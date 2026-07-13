@@ -1,0 +1,4 @@
+.molecule-stage { overflow: hidden; }
+.molecule-stage > .viewer { width: 100%; height: 340px; position: relative; }
+.molecule-stage > .viewer + strong { position: relative; z-index: 2; }
+.molecule-stage > .viewer ~ span { margin-bottom: 14px; }
