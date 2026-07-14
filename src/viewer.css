@@ -45,6 +45,13 @@
 .country-list div { display: flex; justify-content: space-between; padding: 10px 12px; border-radius: 8px; background: #f4f6f4; font-size: 12px; }
 .country-list strong { color: var(--green); }
 
+/* Reserve space for the native chevron so long default labels never overlap it. */
+.field select {
+  padding-right: 36px;
+  text-overflow: ellipsis;
+}
+.split select { min-width: 0; }
+
 @media (max-width: 900px) {
   .search-layout { grid-template-columns: 1fr; }
   .country-list { grid-template-columns: 1fr 1fr; }
