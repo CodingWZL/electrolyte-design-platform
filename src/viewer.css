@@ -51,6 +51,7 @@
   text-overflow: ellipsis;
 }
 .split select { min-width: 0; }
+.concentration-split { grid-template-columns: minmax(92px, .85fr) minmax(120px, 1.15fr); }
 
 @media (max-width: 900px) {
   .search-layout { grid-template-columns: 1fr; }
