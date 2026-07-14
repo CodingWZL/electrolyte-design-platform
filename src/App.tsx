@@ -62,6 +62,11 @@ type ReachPoint = {
   coordinates: [number, number];
   count: number;
 };
+type ReachSnapshot = {
+  visits: number;
+  countries: Record<string, number>;
+  updatedAt: string;
+};
 
 const base = import.meta.env.BASE_URL;
 const geo = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
@@ -714,19 +719,27 @@ function Molecules({ catalog }: { catalog: Catalog }) {
 }
 
 function GlobalReach() {
-  const [visits, setVisits] = useState<number>();
+  const [visits, setVisits] = useState(0);
   const [points, setPoints] = useState<ReachPoint[]>([]);
+  const [updatedAt, setUpdatedAt] = useState("");
   useEffect(() => {
-    readCounter("site-visits")
-      .then(setVisits)
-      .catch(() => {});
-    Promise.all(
-      reachRegions.map(async (r) => ({
-        ...r,
-        count: await readCounter(`country-${r.code}`),
-      })),
-    )
-      .then((all) => setPoints(all.filter((p) => p.count > 0)))
+    fetch(`${base}data/reach.json`, { cache: "no-store" })
+      .then((response) => {
+        if (!response.ok) throw new Error(String(response.status));
+        return response.json() as Promise<ReachSnapshot>;
+      })
+      .then((snapshot) => {
+        setVisits(snapshot.visits);
+        setUpdatedAt(snapshot.updatedAt);
+        setPoints(
+          reachRegions
+            .map((region) => ({
+              ...region,
+              count: snapshot.countries[region.code] ?? 0,
+            }))
+            .filter((point) => point.count > 0),
+        );
+      })
       .catch(() => {});
   }, []);
   const max = Math.max(1, ...points.map((p) => p.count));
@@ -742,7 +755,7 @@ function GlobalReach() {
       </div>
       <div className="metrics analytics-metrics">
         <div>
-          <b>{visits?.toLocaleString() ?? "—"}</b>
+          <b>{visits.toLocaleString()}</b>
           <span>recorded visits</span>
         </div>
         <div>
@@ -799,8 +812,12 @@ function GlobalReach() {
         <div className="map-note">
           <BarChart3 size={18} />
           <span>
-            <b>Country-level aggregation</b>Dots grow with visitor count. City
-            and IP-level histories are intentionally not retained.
+            <b>Country-level aggregation · Updated hourly</b>Dots grow with
+            visitor count. City and IP-level histories are intentionally not
+            retained.
+            {updatedAt && (
+              <> Last snapshot: {new Date(updatedAt).toLocaleString()}.</>
+            )}
           </span>
         </div>
       </div>
