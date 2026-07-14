@@ -984,14 +984,11 @@ function App() {
                   <a href="mailto:zhilongwang.ai@gmail.com">
                     zhilongwang.ai@gmail.com
                   </a>
-                  ).
+                  ) if you have any questions or suggestions.
                 </p>
               </div>
               <div>
                 <a href="https://www.peese.org/">PEESE Lab</a>
-                <a href="https://github.com/CodingWZL/SCAN/blob/main/LICENSE">
-                  License
-                </a>
               </div>
             </footer>
           </>
