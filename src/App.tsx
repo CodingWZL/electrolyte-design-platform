@@ -12,6 +12,7 @@ type ReachPoint={code:string;name:string;coordinates:[number,number];count:numbe
 const base=import.meta.env.BASE_URL;
 const geo='https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json';
 const counterBase='https://api.counterapi.dev/v1/codingwzl-electrolyte-design';
+const counterSeeds:Record<string,number>={'site-visits':14,'country-US':8,'search-uses':3,'prediction-uses':2};
 const predictionDefaults:PredictionInputs={salt:'LiPF6',concentration:.6,concentrationUnit:'mol/l',solvent1:'EC',ratio1:.5,solvent2:'PC',solventUnit:'w',temperature:300};
 const searchDefaults:SearchInputs={salt:'LiPF6',concentration:'.6',concentrationUnit:'mol/l',solvent1:'EC',ratio1:'.5',solvent2:'PC',ratio2:'.5',solventUnit:'w',temperature:'300'};
 const reachRegions:Omit<ReachPoint,'count'>[]=[
@@ -27,9 +28,9 @@ const saltFiles:Record<string,string>={LiPF6:'PF6',LiBF4:'BF4',LiTDI:'TDI',LiFSI
 const solventFiles:Record<string,string>={EC:'EC',PC:'PC',DMC:'DMC',EMC:'EMC',DEC:'DEC',DME:'DME',DMSO:'DMSO',AN:'AN',MOEMC:'MOEMC',TFP:'TFP',EA:'EA',MA:'MA',FEC:'FEC',DOL:'DOL','2-MeTHF':'2-Me',DMM:'DMM','Freon 11':'Freon',MC:'Methy',THF:'THF',Toluene:'Toluene',Sulfolane:'Sulf','2-Glyme':'2-Gly','3-Glyme':'3-Gly','4-Glyme':'4-Gly','3-Me-2-O':'3-me-2-o','3-MeSul':'3-Me',Ethyldg:'Ethyld',DMF:'DMF',Ethylb:'Ethylb',Ethylmg:'Ethylm',Benzene:'Benzene','g-Buty':'g-But',Cumene:'Cumene',PropSul:'Propy',Pseudo:'Pseu',TEOS:'TEOS','m-Xylene':'m-Xylene','o-Xylene':'o-Xylene'};
 
 function counterName(name:string){const preview=location.hostname==='localhost'||location.hostname==='127.0.0.1';return `${preview?'preview-':''}${name}`}
-async function readCounter(name:string){const key=`scan-counter-${counterName(name)}`;try{const r=await fetch(`${counterBase}/${counterName(name)}`);if(!r.ok)throw new Error(String(r.status));const d=await r.json();const value=Number(d.count??d.value??0);localStorage.setItem(key,String(value));return value}catch{return Number(localStorage.getItem(key)??0)}}
+async function readCounter(name:string){const key=`scan-counter-${counterName(name)}`;try{const r=await fetch(`${counterBase}/${counterName(name)}`);if(!r.ok)throw new Error(String(r.status));const d=await r.json();const value=Number(d.count??d.value??0);localStorage.setItem(key,String(value));return value}catch{return Number(localStorage.getItem(key)??counterSeeds[name]??0)}}
 async function bumpCounter(name:string){const r=await fetch(`${counterBase}/${counterName(name)}/up`);if(!r.ok)return 0;const d=await r.json();return Number(d.count??d.value??0)}
-function useCounter(name:string){const [count,setCount]=useState(0);useEffect(()=>{readCounter(name).then(setCount).catch(()=>setCount(0))},[name]);return {count,bump:async()=>{setCount(v=>v+1);try{setCount(await bumpCounter(name))}catch{/* keep the optimistic count */}}}}
+function useCounter(name:string){const [count,setCount]=useState(counterSeeds[name]??0);useEffect(()=>{readCounter(name).then(setCount).catch(()=>{})},[name]);return {count,bump:async()=>{setCount(v=>v+1);try{setCount(await bumpCounter(name))}catch{/* keep the optimistic count */}}}}
 function Field({label,children}:{label:string;children:React.ReactNode}){return <label className="field"><span>{label}</span>{children}</label>}
 function Select({value,onChange,children}:{value:string;onChange:(v:string)=>void;children:React.ReactNode}){return <select value={value} onChange={e=>onChange(e.target.value)}>{children}</select>}
 function AnyOption(){return <option value="">Any / not specified</option>}
