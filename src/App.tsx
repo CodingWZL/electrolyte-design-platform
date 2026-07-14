@@ -15,15 +15,12 @@ const counterBase='https://api.counterapi.dev/v1/codingwzl-electrolyte-design';
 const predictionDefaults:PredictionInputs={salt:'LiPF6',concentration:.6,concentrationUnit:'mol/l',solvent1:'EC',ratio1:.5,solvent2:'PC',solventUnit:'w',temperature:300};
 const searchDefaults:SearchInputs={salt:'LiPF6',concentration:'.6',concentrationUnit:'mol/l',solvent1:'EC',ratio1:'.5',solvent2:'PC',ratio2:'.5',solventUnit:'w',temperature:'300'};
 const reachRegions:Omit<ReachPoint,'count'>[]=[
- {code:'US',name:'United States',coordinates:[-98,39]},{code:'CA',name:'Canada',coordinates:[-106,56]},{code:'MX',name:'Mexico',coordinates:[-102,23]},
- {code:'BR',name:'Brazil',coordinates:[-52,-10]},{code:'AR',name:'Argentina',coordinates:[-64,-34]},{code:'GB',name:'United Kingdom',coordinates:[-3,55]},
- {code:'FR',name:'France',coordinates:[2,46]},{code:'DE',name:'Germany',coordinates:[10,51]},{code:'IT',name:'Italy',coordinates:[12,42]},
- {code:'ES',name:'Spain',coordinates:[-4,40]},{code:'NL',name:'Netherlands',coordinates:[5,52]},{code:'SE',name:'Sweden',coordinates:[15,62]},
- {code:'CH',name:'Switzerland',coordinates:[8,47]},{code:'PL',name:'Poland',coordinates:[19,52]},{code:'TR',name:'Türkiye',coordinates:[35,39]},
- {code:'CN',name:'China',coordinates:[104,35]},{code:'JP',name:'Japan',coordinates:[138,37]},{code:'KR',name:'South Korea',coordinates:[128,36]},
- {code:'IN',name:'India',coordinates:[79,22]},{code:'SG',name:'Singapore',coordinates:[104,1]},{code:'TW',name:'Taiwan',coordinates:[121,24]},
- {code:'AU',name:'Australia',coordinates:[134,-25]},{code:'NZ',name:'New Zealand',coordinates:[174,-41]},{code:'ZA',name:'South Africa',coordinates:[24,-29]},
- {code:'SA',name:'Saudi Arabia',coordinates:[45,24]},{code:'AE',name:'United Arab Emirates',coordinates:[54,24]},{code:'IL',name:'Israel',coordinates:[35,31]}
+ {code:'US',name:'United States',coordinates:[-98,39]},{code:'CA',name:'Canada',coordinates:[-106,56]},
+ {code:'BR',name:'Brazil',coordinates:[-52,-10]},{code:'GB',name:'United Kingdom',coordinates:[-3,55]},
+ {code:'FR',name:'France',coordinates:[2,46]},{code:'DE',name:'Germany',coordinates:[10,51]},
+ {code:'CN',name:'China',coordinates:[104,35]},{code:'JP',name:'Japan',coordinates:[138,37]},
+ {code:'KR',name:'South Korea',coordinates:[128,36]},{code:'IN',name:'India',coordinates:[79,22]},
+ {code:'SG',name:'Singapore',coordinates:[104,1]},{code:'AU',name:'Australia',coordinates:[134,-25]}
 ];
 
 const saltFiles:Record<string,string>={LiPF6:'PF6',LiBF4:'BF4',LiTDI:'TDI',LiFSI:'FSI',LiTFSI:'TFSI',LiPDI:'PDI',LiClO4:'ClO4',LiAsF6:'AsF6',LiBOB:'BOB',LiCF3SO3:'CF3SO3',LiBPFPB:'BPFPB',LiBMB:'BMB','LiN(CF3SO2)2':'NCF3SO2'};
