@@ -4,7 +4,7 @@ const namespace = "codingwzl-electrolyte-design";
 const endpoint = `https://api.counterapi.dev/v1/${namespace}`;
 const countryCodes = ["US", "CA", "BR", "GB", "FR", "DE", "CN", "JP", "KR", "IN", "SG", "AU"];
 
-let previous = { visits: 0, countries: {} };
+let previous = { visits: 0, countries: {}, usage: {} };
 try {
   previous = JSON.parse(await readFile(new URL("../public/data/reach.json", import.meta.url), "utf8"));
 } catch {
@@ -31,7 +31,11 @@ const countries = Object.fromEntries(
     ]),
   ),
 );
-const snapshot = { visits, countries, updatedAt: new Date().toISOString() };
+const usage = {
+  "search-uses": await read("search-uses", previous.usage?.["search-uses"] ?? 0),
+  "prediction-uses": await read("prediction-uses", previous.usage?.["prediction-uses"] ?? 0),
+};
+const snapshot = { visits, countries, usage, updatedAt: new Date().toISOString() };
 
 await mkdir(new URL("../public/data/", import.meta.url), { recursive: true });
 await writeFile(

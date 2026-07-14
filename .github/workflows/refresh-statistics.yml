@@ -1,7 +1,8 @@
-name: Deploy website
+name: Refresh statistics and deploy
 on:
-  push:
-    branches: [main]
+  schedule:
+    # Twice hourly, away from the top-of-hour Actions traffic peak.
+    - cron: '23,53 * * * *'
   workflow_dispatch:
 permissions:
   contents: read
@@ -23,7 +24,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Refresh hourly reach snapshot
+      - name: Refresh statistics snapshot
         run: node scripts/fetch_reach_snapshot.mjs
       - run: pnpm build
       - uses: actions/configure-pages@v5

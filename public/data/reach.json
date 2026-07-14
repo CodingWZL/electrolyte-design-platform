@@ -14,5 +14,9 @@
     "SG": 0,
     "AU": 0
   },
+  "usage": {
+    "search-uses": 3,
+    "prediction-uses": 2
+  },
   "updatedAt": "2026-07-14T22:38:26.195Z"
 }

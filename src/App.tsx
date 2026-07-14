@@ -65,6 +65,7 @@ type ReachPoint = {
 type ReachSnapshot = {
   visits: number;
   countries: Record<string, number>;
+  usage: Record<string, number>;
   updatedAt: string;
 };
 
@@ -196,8 +197,12 @@ async function bumpCounter(name: string) {
 function useCounter(name: string) {
   const [count, setCount] = useState(counterSeeds[name] ?? 0);
   useEffect(() => {
-    readCounter(name)
-      .then(setCount)
+    fetch(`${base}data/reach.json`, { cache: "no-store" })
+      .then((response) => {
+        if (!response.ok) throw new Error(String(response.status));
+        return response.json() as Promise<ReachSnapshot>;
+      })
+      .then((snapshot) => setCount(snapshot.usage[name] ?? 0))
       .catch(() => {});
   }, [name]);
   return {
@@ -249,7 +254,7 @@ function UsageCounter({ label, count }: { label: string; count: number }) {
     <div className="usage-counter">
       <span>{label}</span>
       <strong>{count.toLocaleString()}</strong>
-      <small>total uses</small>
+      <small>total uses · updated hourly</small>
     </div>
   );
 }
