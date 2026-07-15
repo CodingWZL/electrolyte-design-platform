@@ -23,8 +23,6 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Refresh hourly reach snapshot
-        run: node scripts/fetch_reach_snapshot.mjs
       - run: pnpm build
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

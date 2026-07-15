@@ -62,13 +62,6 @@ type ReachPoint = {
   coordinates: [number, number];
   count: number;
 };
-type ReachSnapshot = {
-  visits: number;
-  countries: Record<string, number>;
-  usage: Record<string, number>;
-  updatedAt: string;
-};
-
 const base = import.meta.env.BASE_URL;
 const geo = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
 const counterBase =
@@ -188,27 +181,37 @@ async function readCounter(name: string) {
     return Number(localStorage.getItem(key) ?? counterSeeds[name] ?? 0);
   }
 }
-async function bumpCounter(name: string) {
+async function bumpCounter(name: string, optimistic = false) {
+  const key = `scan-counter-${counterName(name)}`;
+  if (optimistic) {
+    const next = Number(localStorage.getItem(key) ?? counterSeeds[name] ?? 0) + 1;
+    localStorage.setItem(key, String(next));
+  }
   const r = await fetch(`${counterBase}/${counterName(name)}/up`);
-  if (!r.ok) return 0;
+  if (!r.ok) throw new Error(String(r.status));
   const d = await r.json();
-  return Number(d.count ?? d.value ?? 0);
+  const value = Number(d.count ?? d.value ?? 0);
+  localStorage.setItem(key, String(value));
+  return value;
 }
 function useCounter(name: string) {
-  const [count, setCount] = useState(counterSeeds[name] ?? 0);
+  const key = `scan-counter-${counterName(name)}`;
+  const [count, setCount] = useState(() =>
+    Number(localStorage.getItem(key) ?? counterSeeds[name] ?? 0),
+  );
   useEffect(() => {
-    fetch(`${base}data/reach.json`, { cache: "no-store" })
-      .then((response) => {
-        if (!response.ok) throw new Error(String(response.status));
-        return response.json() as Promise<ReachSnapshot>;
-      })
-      .then((snapshot) => setCount(snapshot.usage[name] ?? 0))
+    readCounter(name)
+      .then(setCount)
       .catch(() => {});
-  }, [name]);
+  }, [name, key]);
   return {
     count,
     bump: async () => {
-      setCount((v) => v + 1);
+      setCount((current) => {
+        const next = current + 1;
+        localStorage.setItem(key, String(next));
+        return next;
+      });
       try {
         setCount(await bumpCounter(name));
       } catch {
@@ -254,7 +257,7 @@ function UsageCounter({ label, count }: { label: string; count: number }) {
     <div className="usage-counter">
       <span>{label}</span>
       <strong>{count.toLocaleString()}</strong>
-      <small>total uses · updated hourly</small>
+      <small>total uses</small>
     </div>
   );
 }
@@ -724,27 +727,28 @@ function Molecules({ catalog }: { catalog: Catalog }) {
 }
 
 function GlobalReach() {
-  const [visits, setVisits] = useState(0);
-  const [points, setPoints] = useState<ReachPoint[]>([]);
-  const [updatedAt, setUpdatedAt] = useState("");
+  const [visits, setVisits] = useState(() =>
+    Number(localStorage.getItem("scan-counter-site-visits") ?? 0),
+  );
+  const [points, setPoints] = useState<ReachPoint[]>(() =>
+    reachRegions
+      .map((region) => ({
+        ...region,
+        count: Number(
+          localStorage.getItem(`scan-counter-country-${region.code}`) ?? 0,
+        ),
+      }))
+      .filter((point) => point.count > 0),
+  );
   useEffect(() => {
-    fetch(`${base}data/reach.json`, { cache: "no-store" })
-      .then((response) => {
-        if (!response.ok) throw new Error(String(response.status));
-        return response.json() as Promise<ReachSnapshot>;
-      })
-      .then((snapshot) => {
-        setVisits(snapshot.visits);
-        setUpdatedAt(snapshot.updatedAt);
-        setPoints(
-          reachRegions
-            .map((region) => ({
-              ...region,
-              count: snapshot.countries[region.code] ?? 0,
-            }))
-            .filter((point) => point.count > 0),
-        );
-      })
+    readCounter("site-visits").then(setVisits).catch(() => {});
+    Promise.all(
+      reachRegions.map(async (region) => ({
+        ...region,
+        count: await readCounter(`country-${region.code}`),
+      })),
+    )
+      .then((all) => setPoints(all.filter((point) => point.count > 0)))
       .catch(() => {});
   }, []);
   const max = Math.max(1, ...points.map((p) => p.count));
@@ -817,12 +821,9 @@ function GlobalReach() {
         <div className="map-note">
           <BarChart3 size={18} />
           <span>
-            <b>Country-level aggregation · Updated hourly</b>Dots grow with
-            visitor count. City and IP-level histories are intentionally not
-            retained.
-            {updatedAt && (
-              <> Last snapshot: {new Date(updatedAt).toLocaleString()}.</>
-            )}
+            <b>Live cumulative counts · refreshed on page entry</b>Dots grow
+            with visitor count. City and IP-level histories are intentionally
+            not retained.
           </span>
         </div>
       </div>
@@ -837,17 +838,14 @@ function App() {
     fetch(`${base}features.json`)
       .then((r) => r.json())
       .then(setCatalog);
-    if (!sessionStorage.getItem("scan-site-visit")) {
-      sessionStorage.setItem("scan-site-visit", "1");
-      bumpCounter("site-visits").catch(() => {});
-      fetch("https://ipwho.is/")
-        .then((r) => r.json())
-        .then((d) => {
-          if (d.success !== false && d.country_code)
-            bumpCounter(`country-${String(d.country_code).toUpperCase()}`);
-        })
-        .catch(() => {});
-    }
+    bumpCounter("site-visits", true).catch(() => {});
+    fetch("https://ipwho.is/")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.success !== false && d.country_code)
+          bumpCounter(`country-${String(d.country_code).toUpperCase()}`, true);
+      })
+      .catch(() => {});
   }, []);
   const nav = useMemo(
     () => [
