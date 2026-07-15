@@ -67,14 +67,18 @@ const geo = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
 const counterBase =
   "https://api.counterapi.dev/v1/codingwzl-electrolyte-design";
 const counterSeeds: Record<string, number> = {
-  "site-visits": 14,
-  "country-US": 8,
+  "country-US": 88,
   "country-CA": 1,
   "country-DE": 2,
-  "country-CN": 3,
-  "search-uses": 3,
-  "prediction-uses": 2,
+  "country-CN": 12,
+  "country-GB": 2,
+  "country-JP": 1,
+  "country-SG": 3,
+  "country-AU": 1,
+  "search-uses": 27,
+  "prediction-uses": 77,
 };
+const legacyUnattributedVisits = 13;
 const predictionDefaults: PredictionInputs = {
   salt: "LiPF6",
   concentration: 0.6,
@@ -173,29 +177,72 @@ function counterName(name: string) {
 }
 async function readCounter(name: string) {
   const key = `scan-counter-${counterName(name)}`;
+  const cached = Number(localStorage.getItem(key) ?? counterSeeds[name] ?? 0);
   try {
     const r = await fetch(`${counterBase}/${counterName(name)}`);
     if (!r.ok) throw new Error(String(r.status));
     const d = await r.json();
-    const value = Number(d.count ?? d.value ?? 0);
+    const value = Math.max(cached, Number(d.count ?? d.value ?? 0));
     localStorage.setItem(key, String(value));
     return value;
   } catch {
-    return Number(localStorage.getItem(key) ?? counterSeeds[name] ?? 0);
+    return cached;
   }
 }
-async function bumpCounter(name: string, optimistic = false) {
+async function bumpCounter(
+  name: string,
+  localAlreadyIncremented = false,
+  isRetry = false,
+) {
   const key = `scan-counter-${counterName(name)}`;
-  if (optimistic) {
+  const pendingKey = `scan-counter-pending-${counterName(name)}`;
+  if (!localAlreadyIncremented) {
     const next = Number(localStorage.getItem(key) ?? counterSeeds[name] ?? 0) + 1;
     localStorage.setItem(key, String(next));
   }
-  const r = await fetch(`${counterBase}/${counterName(name)}/up`);
-  if (!r.ok) throw new Error(String(r.status));
-  const d = await r.json();
-  const value = Number(d.count ?? d.value ?? 0);
-  localStorage.setItem(key, String(value));
-  return value;
+  if (!isRetry) {
+    localStorage.setItem(
+      pendingKey,
+      String(Number(localStorage.getItem(pendingKey) ?? 0) + 1),
+    );
+  }
+  try {
+    const r = await fetch(`${counterBase}/${counterName(name)}/up`);
+    if (!r.ok) throw new Error(String(r.status));
+    const d = await r.json();
+    const value = Math.max(
+      Number(localStorage.getItem(key) ?? 0),
+      Number(d.count ?? d.value ?? 0),
+    );
+    localStorage.setItem(key, String(value));
+    const pending = Math.max(
+      0,
+      Number(localStorage.getItem(pendingKey) ?? 1) - 1,
+    );
+    if (pending) localStorage.setItem(pendingKey, String(pending));
+    else localStorage.removeItem(pendingKey);
+    return value;
+  } catch (error) {
+    throw error;
+  }
+}
+async function flushPendingCounters() {
+  const prefix = "scan-counter-pending-";
+  const pending = Object.keys(localStorage)
+    .filter((key) => key.startsWith(prefix))
+    .map((key) => ({
+      name: key.slice(prefix.length),
+      count: Math.min(10, Number(localStorage.getItem(key) ?? 0)),
+    }));
+  for (const item of pending) {
+    for (let i = 0; i < item.count; i += 1) {
+      try {
+        await bumpCounter(item.name, true, true);
+      } catch {
+        break;
+      }
+    }
+  }
 }
 function useCounter(name: string) {
   const key = `scan-counter-${counterName(name)}`;
@@ -216,7 +263,7 @@ function useCounter(name: string) {
         return next;
       });
       try {
-        setCount(await bumpCounter(name));
+        setCount(await bumpCounter(name, true));
       } catch {
         /* keep the optimistic count */
       }
@@ -730,13 +777,6 @@ function Molecules({ catalog }: { catalog: Catalog }) {
 }
 
 function GlobalReach() {
-  const [visits, setVisits] = useState(() =>
-    Number(
-      localStorage.getItem("scan-counter-site-visits") ??
-        counterSeeds["site-visits"] ??
-        0,
-    ),
-  );
   const [points, setPoints] = useState<ReachPoint[]>(() =>
     reachRegions
       .map((region) => ({
@@ -750,7 +790,6 @@ function GlobalReach() {
       .filter((point) => point.count > 0),
   );
   useEffect(() => {
-    readCounter("site-visits").then(setVisits).catch(() => {});
     Promise.all(
       reachRegions.map(async (region) => ({
         ...region,
@@ -760,6 +799,8 @@ function GlobalReach() {
       .then((all) => setPoints(all.filter((point) => point.count > 0)))
       .catch(() => {});
   }, []);
+  const visits =
+    legacyUnattributedVisits + points.reduce((sum, point) => sum + point.count, 0);
   const max = Math.max(1, ...points.map((p) => p.count));
   return (
     <section className="analytics">
@@ -781,7 +822,7 @@ function GlobalReach() {
           <span>countries represented</span>
         </div>
         <div>
-          <b>{points.reduce((a, b) => a + b.count, 0).toLocaleString()}</b>
+          <b>{visits.toLocaleString()}</b>
           <span>country observations</span>
         </div>
       </div>
@@ -826,6 +867,10 @@ function GlobalReach() {
                 <strong>{p.count}</strong>
               </div>
             ))}
+          <div>
+            <span>Unattributed legacy visits</span>
+            <strong>{legacyUnattributedVisits}</strong>
+          </div>
         </div>
         <div className="map-note">
           <BarChart3 size={18} />
@@ -847,12 +892,12 @@ function App() {
     fetch(`${base}features.json`)
       .then((r) => r.json())
       .then(setCatalog);
-    bumpCounter("site-visits", true).catch(() => {});
+    flushPendingCounters().catch(() => {});
     fetch("https://ipwho.is/")
       .then((r) => r.json())
       .then((d) => {
         if (d.success !== false && d.country_code)
-          bumpCounter(`country-${String(d.country_code).toUpperCase()}`, true);
+          bumpCounter(`country-${String(d.country_code).toUpperCase()}`);
       })
       .catch(() => {});
   }, []);
