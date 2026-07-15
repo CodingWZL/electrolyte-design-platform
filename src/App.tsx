@@ -69,6 +69,9 @@ const counterBase =
 const counterSeeds: Record<string, number> = {
   "site-visits": 14,
   "country-US": 8,
+  "country-CA": 1,
+  "country-DE": 2,
+  "country-CN": 3,
   "search-uses": 3,
   "prediction-uses": 2,
 };
@@ -728,14 +731,20 @@ function Molecules({ catalog }: { catalog: Catalog }) {
 
 function GlobalReach() {
   const [visits, setVisits] = useState(() =>
-    Number(localStorage.getItem("scan-counter-site-visits") ?? 0),
+    Number(
+      localStorage.getItem("scan-counter-site-visits") ??
+        counterSeeds["site-visits"] ??
+        0,
+    ),
   );
   const [points, setPoints] = useState<ReachPoint[]>(() =>
     reachRegions
       .map((region) => ({
         ...region,
         count: Number(
-          localStorage.getItem(`scan-counter-country-${region.code}`) ?? 0,
+          localStorage.getItem(`scan-counter-country-${region.code}`) ??
+            counterSeeds[`country-${region.code}`] ??
+            0,
         ),
       }))
       .filter((point) => point.count > 0),
