@@ -32,6 +32,14 @@ jobs:
           node-version: 20
       - name: Validate and update floor
         run: node tools/set_counter_floor.mjs "${{ inputs.counter }}" "${{ inputs.value }}"
+      - name: Synchronize remote counter
+        env:
+          COUNTER: ${{ inputs.counter }}
+          VALUE: ${{ inputs.value }}
+        run: |
+          curl --fail --silent --show-error --retry 3 --get \
+            --data-urlencode "count=$VALUE" \
+            "https://api.counterapi.dev/v1/codingwzl-electrolyte-design/$COUNTER/"
       - name: Commit correction
         run: |
           git config user.name "github-actions[bot]"
