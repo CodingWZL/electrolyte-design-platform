@@ -179,7 +179,10 @@ async function readCounter(name: string) {
   const key = `scan-counter-${counterName(name)}`;
   const cached = Number(localStorage.getItem(key) ?? counterSeeds[name] ?? 0);
   try {
-    const r = await fetch(`${counterBase}/${counterName(name)}`);
+    const r = await fetch(
+      `${counterBase}/${counterName(name)}?fresh=${Date.now()}`,
+      { cache: "no-store" },
+    );
     if (!r.ok) throw new Error(String(r.status));
     const d = await r.json();
     const value = Math.max(cached, Number(d.count ?? d.value ?? 0));
