@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as ort from "onnxruntime-web";
+import { reachRegionsData } from "./reach-regions";
 import {
   Atom,
   BarChart3,
@@ -101,20 +102,12 @@ const searchDefaults: SearchInputs = {
   solventUnit: "w",
   temperature: "300",
 };
-const reachRegions: Omit<ReachPoint, "count">[] = [
-  { code: "US", name: "United States", coordinates: [-98, 39] },
-  { code: "CA", name: "Canada", coordinates: [-106, 56] },
-  { code: "BR", name: "Brazil", coordinates: [-52, -10] },
-  { code: "GB", name: "United Kingdom", coordinates: [-3, 55] },
-  { code: "FR", name: "France", coordinates: [2, 46] },
-  { code: "DE", name: "Germany", coordinates: [10, 51] },
-  { code: "CN", name: "China", coordinates: [104, 35] },
-  { code: "JP", name: "Japan", coordinates: [138, 37] },
-  { code: "KR", name: "South Korea", coordinates: [128, 36] },
-  { code: "IN", name: "India", coordinates: [79, 22] },
-  { code: "SG", name: "Singapore", coordinates: [104, 1] },
-  { code: "AU", name: "Australia", coordinates: [134, -25] },
-];
+const reachRegions: Omit<ReachPoint, "count">[] = reachRegionsData.map(
+  (region) => ({
+    ...region,
+    coordinates: [...region.coordinates] as [number, number],
+  }),
+);
 
 const saltFiles: Record<string, string> = {
   LiPF6: "PF6",
@@ -209,10 +202,12 @@ async function readCounter(name: string) {
     Number(localStorage.getItem(key) ?? 0),
     counterFloor(name),
   );
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 4500);
   try {
     const r = await fetch(
       `${counterBase}/${counterName(name)}?fresh=${Date.now()}`,
-      { cache: "no-store" },
+      { cache: "no-store", signal: controller.signal },
     );
     if (!r.ok) throw new Error(String(r.status));
     const d = await r.json();
@@ -221,7 +216,26 @@ async function readCounter(name: string) {
     return value;
   } catch {
     return cached;
+  } finally {
+    window.clearTimeout(timeout);
   }
+}
+async function readReachCounters() {
+  const results = new Array<ReachPoint>(reachRegions.length);
+  let nextIndex = 0;
+  const worker = async () => {
+    while (nextIndex < reachRegions.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      const region = reachRegions[index];
+      results[index] = {
+        ...region,
+        count: await readCounter(`country-${region.code}`),
+      };
+    }
+  };
+  await Promise.all(Array.from({ length: 24 }, worker));
+  return results.filter((point) => point.count > 0);
 }
 async function bumpCounter(
   name: string,
@@ -868,14 +882,7 @@ function GlobalReach() {
       .filter((point) => point.count > 0),
   );
   useEffect(() => {
-    Promise.all(
-      reachRegions.map(async (region) => ({
-        ...region,
-        count: await readCounter(`country-${region.code}`),
-      })),
-    )
-      .then((all) => setPoints(all.filter((point) => point.count > 0)))
-      .catch(() => {});
+    readReachCounters().then(setPoints).catch(() => {});
   }, []);
   const visits =
     legacyUnattributedVisits + points.reduce((sum, point) => sum + point.count, 0);
@@ -953,9 +960,9 @@ function GlobalReach() {
         <div className="map-note">
           <BarChart3 size={18} />
           <span>
-            <b>Live cumulative counts · refreshed on page entry</b>Dots grow
-            with visitor count. City and IP-level histories are intentionally
-            not retained.
+            <b>Live cumulative counts · all ISO countries checked on entry</b>
+            Dots grow with visitor count. City and IP-level histories are
+            intentionally not retained.
           </span>
         </div>
       </div>

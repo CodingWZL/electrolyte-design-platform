@@ -45,6 +45,9 @@ importers:
       vite:
         specifier: ^6.0.5
         version: 6.4.3(@types/node@26.1.1)
+      world-countries:
+        specifier: 5.1.0
+        version: 5.1.0
 
 packages:
 
@@ -902,6 +905,9 @@ packages:
     resolution: {integrity: sha512-0yweIbkINJodk27gX9LBGMzyQdBDan3s/dEAiwBOj+Mf0PPyWL6/rikalkv8EeD0E8jm4o5RXEOrFTP3NXbhJg==}
     engines: {node: '>=12.17'}
 
+  world-countries@5.1.0:
+    resolution: {integrity: sha512-CXR6EBvTbArDlDDIWU3gfKb7Qk0ck2WNZ234b/A0vuecPzIfzzxH+O6Ejnvg1sT8XuiZjVlzOH0h08ZtaO7g0w==}
+
   yallist@3.1.1:
     resolution: {integrity: sha512-a4UGQaWPH59mOXUYnAG2ewncQS4i4F43Tv3JoAM+s2VDAmS9NsK8GpDMLrCHPksFT7h3K6TOoUNn2pb7RoXx4g==}
 
@@ -1663,5 +1669,7 @@ snapshots:
       fsevents: 2.3.3
 
   wordwrapjs@5.1.1: {}
+
+  world-countries@5.1.0: {}
 
   yallist@3.1.1: {}
