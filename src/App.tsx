@@ -78,6 +78,8 @@ const counterSeeds: Record<string, number> = {
   "search-uses": 27,
   "prediction-uses": 77,
 };
+let manualCounterFloors: Record<string, number> = {};
+let counterFloorPromise: Promise<void> | undefined;
 const legacyUnattributedVisits = 13;
 const predictionDefaults: PredictionInputs = {
   salt: "LiPF6",
@@ -175,9 +177,38 @@ function counterName(name: string) {
     location.hostname === "localhost" || location.hostname === "127.0.0.1";
   return `${preview ? "preview-" : ""}${name}`;
 }
+function counterFloor(name: string) {
+  return Math.max(counterSeeds[name] ?? 0, manualCounterFloors[name] ?? 0);
+}
+function loadCounterFloors() {
+  if (!counterFloorPromise) {
+    counterFloorPromise = fetch(`${base}counter-floors.json?fresh=${Date.now()}`, {
+      cache: "no-store",
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error(String(response.status));
+        return response.json();
+      })
+      .then((data) => {
+        if (data && typeof data === "object") {
+          manualCounterFloors = Object.fromEntries(
+            Object.entries(data).filter(
+              ([, value]) => Number.isInteger(value) && Number(value) >= 0,
+            ),
+          ) as Record<string, number>;
+        }
+      })
+      .catch(() => {});
+  }
+  return counterFloorPromise;
+}
 async function readCounter(name: string) {
+  await loadCounterFloors();
   const key = `scan-counter-${counterName(name)}`;
-  const cached = Number(localStorage.getItem(key) ?? counterSeeds[name] ?? 0);
+  const cached = Math.max(
+    Number(localStorage.getItem(key) ?? 0),
+    counterFloor(name),
+  );
   try {
     const r = await fetch(
       `${counterBase}/${counterName(name)}?fresh=${Date.now()}`,
@@ -200,7 +231,8 @@ async function bumpCounter(
   const key = `scan-counter-${counterName(name)}`;
   const pendingKey = `scan-counter-pending-${counterName(name)}`;
   if (!localAlreadyIncremented) {
-    const next = Number(localStorage.getItem(key) ?? counterSeeds[name] ?? 0) + 1;
+    const next =
+      Math.max(Number(localStorage.getItem(key) ?? 0), counterFloor(name)) + 1;
     localStorage.setItem(key, String(next));
   }
   if (!isRetry) {
@@ -247,10 +279,53 @@ async function flushPendingCounters() {
     }
   }
 }
+async function requestCountryCode(
+  url: string,
+  parse: (response: Response) => Promise<string | undefined>,
+) {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 3500);
+  try {
+    const response = await fetch(url, {
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    if (!response.ok) return undefined;
+    const code = (await parse(response))?.trim().toUpperCase();
+    return code && /^[A-Z]{2}$/.test(code) ? code : undefined;
+  } catch {
+    return undefined;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+async function detectCountryCode() {
+  const providers = [
+    () =>
+      requestCountryCode("https://api.country.is/", async (response) => {
+        const data = await response.json();
+        return data.country;
+      }),
+    () =>
+      requestCountryCode("https://ipwho.is/", async (response) => {
+        const data = await response.json();
+        return data.success === false ? undefined : data.country_code;
+      }),
+    () =>
+      requestCountryCode("https://ipapi.co/country/", (response) =>
+        response.text(),
+      ),
+  ];
+  for (const provider of providers) {
+    const code = await provider();
+    if (code) return code;
+  }
+  return undefined;
+}
 function useCounter(name: string) {
   const key = `scan-counter-${counterName(name)}`;
   const [count, setCount] = useState(() =>
-    Number(localStorage.getItem(key) ?? counterSeeds[name] ?? 0),
+    Math.max(Number(localStorage.getItem(key) ?? 0), counterFloor(name)),
   );
   useEffect(() => {
     readCounter(name)
@@ -896,11 +971,9 @@ function App() {
       .then((r) => r.json())
       .then(setCatalog);
     flushPendingCounters().catch(() => {});
-    fetch("https://ipwho.is/")
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.success !== false && d.country_code)
-          bumpCounter(`country-${String(d.country_code).toUpperCase()}`);
+    detectCountryCode()
+      .then((countryCode) => {
+        if (countryCode) bumpCounter(`country-${countryCode}`);
       })
       .catch(() => {});
   }, []);
