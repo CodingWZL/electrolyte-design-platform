@@ -33,9 +33,12 @@ Add these two GitHub Actions secrets once:
 - `CLOUDFLARE_ACCOUNT_ID`
 - `CLOUDFLARE_API_TOKEN` with Workers Scripts edit permission
 
-Run **Deploy private analytics** from GitHub Actions. The workflow deploys the
-Worker, generates a private rate-limit salt, saves the Worker URL as the
-`ANALYTICS_ENDPOINT` repository variable, and redeploys GitHub Pages.
+Register the account's `workers.dev` subdomain once, then add the deployed
+Worker URL as the `ANALYTICS_ENDPOINT` repository variable. Run **Deploy private
+analytics** from GitHub Actions. The workflow deploys the Worker, generates a
+private rate-limit salt, verifies the service, and redeploys GitHub Pages. The
+repository variable is intentionally administrator-managed because the default
+workflow token cannot create or update Actions variables.
 
 The service intentionally has no public admin, set, reset, or correction route.
 Country comes from Cloudflare's request metadata. Raw IP addresses are never
