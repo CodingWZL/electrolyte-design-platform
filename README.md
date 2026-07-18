@@ -8,7 +8,7 @@ A browser-native research interface for the SCAN non-aqueous electrolyte project
 - Run the trained dynamic-routing conductivity model locally in the browser with ONNX Runtime Web.
 - Interactively rotate and inspect the published salt and solvent structures with 3Dmol.js.
 - Read the scientific context, developers, citation, and planned advanced modules.
-- Connect a privacy-friendly analytics backend without placing secrets in the public bundle.
+- Record page views, searches, predictions, and server-derived countries through a private Cloudflare Durable Object. The public site has no counter-setting endpoint or analytics secret.
 
 The scientific source, training code, and original data are maintained in [CodingWZL/SCAN](https://github.com/CodingWZL/SCAN).
 
@@ -21,3 +21,22 @@ pnpm build
 ```
 
 Pushes to `main` deploy automatically through GitHub Pages.
+
+## Private analytics deployment
+
+The website deliberately does not use CounterAPI, browser geolocation, public
+counter floors, or `localStorage` as an analytics authority. Counts are
+deduplicated and updated transactionally in a Cloudflare Durable Object.
+
+Add these two GitHub Actions secrets once:
+
+- `CLOUDFLARE_ACCOUNT_ID`
+- `CLOUDFLARE_API_TOKEN` with Workers Scripts edit permission
+
+Run **Deploy private analytics** from GitHub Actions. The workflow deploys the
+Worker, generates a private rate-limit salt, saves the Worker URL as the
+`ANALYTICS_ENDPOINT` repository variable, and redeploys GitHub Pages.
+
+The service intentionally has no public admin, set, reset, or correction route.
+Country comes from Cloudflare's request metadata. Raw IP addresses are never
+stored; only short-lived salted hashes are used to constrain abusive traffic.
