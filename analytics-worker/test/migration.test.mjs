@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { AnalyticsStore } from "../src/index.js";
+import worker, { AnalyticsStore } from "../src/index.js";
 
 class MemoryStorage {
   constructor(entries = []) {
@@ -72,4 +72,24 @@ test("legacy totals migrate once and continue incrementing", async () => {
     incremented.countries.reduce((sum, country) => sum + country.count, 0),
     incremented.totalViews,
   );
+});
+
+test("browser CORS preflight returns a bodyless 204 response", async () => {
+  const origin = "https://codingwzl.github.io";
+  const response = await worker.fetch(
+    new Request("https://analytics.example/v1/events", {
+      method: "OPTIONS",
+      headers: {
+        Origin: origin,
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "content-type",
+      },
+    }),
+    { ALLOWED_ORIGIN: origin },
+  );
+
+  assert.equal(response.status, 204);
+  assert.equal(await response.text(), "");
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), origin);
+  assert.match(response.headers.get("Access-Control-Allow-Methods"), /POST/);
 });

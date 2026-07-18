@@ -46,7 +46,10 @@ function json(data, status = 200, origin = "") {
     headers.set("Access-Control-Max-Age", "86400");
     headers.set("Vary", "Origin");
   }
-  return new Response(JSON.stringify(data), { status, headers });
+  return new Response(status === 204 ? null : JSON.stringify(data), {
+    status,
+    headers,
+  });
 }
 
 function allowedOrigin(request, env) {
