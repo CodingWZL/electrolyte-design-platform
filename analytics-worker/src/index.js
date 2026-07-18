@@ -2,6 +2,34 @@ const EVENT_TYPES = new Set(["page_view", "search", "prediction"]);
 const EVENT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const COUNTRY_PATTERN = /^[A-Z]{2}$/;
 const HOUR = 60 * 60 * 1000;
+const LEGACY_MIGRATION_KEY = "migration:counterapi-history:2026-07-18";
+const LEGACY_METRIC_BASELINES = {
+  search: 225,
+  prediction: 901,
+};
+const LEGACY_COUNTRY_BASELINES = {
+  US: 244,
+  CN: 602,
+  JP: 13,
+  HK: 13,
+  SG: 9,
+  CA: 4,
+  DE: 3,
+  NL: 2,
+  NZ: 2,
+  GB: 2,
+  AU: 1,
+  TW: 1,
+  SA: 1,
+  RO: 1,
+  CZ: 1,
+  CO: 1,
+  LU: 1,
+  BD: 1,
+  // Preserves the legacy total above 1,000 without assigning unknown visits
+  // to a country that cannot be recovered from the old browser-local cache.
+  ZZ: 99,
+};
 
 function json(data, status = 200, origin = "") {
   const headers = new Headers({
@@ -103,7 +131,56 @@ export class AnalyticsStore {
     this.storage = state.storage;
   }
 
+  async ensureLegacyMigration() {
+    if (await this.storage.get(LEGACY_MIGRATION_KEY)) return;
+
+    await this.storage.transaction(async (transaction) => {
+      if (await transaction.get(LEGACY_MIGRATION_KEY)) return;
+
+      const existingCountries = await transaction.list({ prefix: "country:" });
+      const mergedCountries = new Map(
+        Array.from(existingCountries.entries()).map(([key, count]) => [
+          key.slice(8),
+          Number(count),
+        ]),
+      );
+      for (const [code, baseline] of Object.entries(LEGACY_COUNTRY_BASELINES)) {
+        mergedCountries.set(
+          code,
+          Math.max(mergedCountries.get(code) ?? 0, baseline),
+        );
+      }
+
+      const currentViews = Number(
+        (await transaction.get("metric:page_view")) ?? 0,
+      );
+      let countryTotal = Array.from(mergedCountries.values()).reduce(
+        (sum, count) => sum + count,
+        0,
+      );
+      if (currentViews > countryTotal) {
+        const difference = currentViews - countryTotal;
+        mergedCountries.set("ZZ", (mergedCountries.get("ZZ") ?? 0) + difference);
+        countryTotal = currentViews;
+      }
+
+      for (const [code, count] of mergedCountries) {
+        await transaction.put(`country:${code}`, count);
+      }
+      await transaction.put("metric:page_view", countryTotal);
+
+      for (const [metric, baseline] of Object.entries(LEGACY_METRIC_BASELINES)) {
+        const key = `metric:${metric}`;
+        const current = Number((await transaction.get(key)) ?? 0);
+        await transaction.put(key, Math.max(current, baseline));
+      }
+
+      await transaction.put(LEGACY_MIGRATION_KEY, new Date().toISOString());
+    });
+  }
+
   async summary() {
+    await this.ensureLegacyMigration();
     const [pageViews, searchUses, predictionUses, verifiedSince, countryEntries] =
       await Promise.all([
         this.storage.get("metric:page_view"),
@@ -127,6 +204,7 @@ export class AnalyticsStore {
   }
 
   async record(event) {
+    await this.ensureLegacyMigration();
     const limit = event.type === "page_view" ? 120 : 60;
     const rateKey = `rate:${event.type}:${event.sourceHash}`;
     const eventKey = `event:${event.eventId}`;

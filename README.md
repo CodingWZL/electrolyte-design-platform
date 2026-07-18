@@ -43,3 +43,9 @@ workflow token cannot create or update Actions variables.
 The service intentionally has no public admin, set, reset, or correction route.
 Country comes from Cloudflare's request metadata. Raw IP addresses are never
 stored; only short-lived salted hashes are used to constrain abusive traffic.
+
+The first private deployment includes a one-time monotonic migration of the
+last recoverable CounterAPI totals and published country floors. It never
+reduces newer Durable Object values, preserves unrecoverable browser-local
+history as unattributed visits, and is guarded by a durable migration key so a
+normal redeploy cannot apply it twice.
