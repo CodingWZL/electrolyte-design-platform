@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as ort from "onnxruntime-web";
+import {
+  analyticsConfigured,
+  readAnalytics,
+  recordAnalyticsEvent,
+  type AnalyticsEvent,
+  type AnalyticsSummary,
+} from "./analytics";
 import { reachRegionsData } from "./reach-regions";
 import {
   Atom,
@@ -65,23 +72,6 @@ type ReachPoint = {
 };
 const base = import.meta.env.BASE_URL;
 const geo = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
-const counterBase =
-  "https://api.counterapi.dev/v1/codingwzl-electrolyte-design";
-const counterSeeds: Record<string, number> = {
-  "country-US": 88,
-  "country-CA": 1,
-  "country-DE": 2,
-  "country-CN": 12,
-  "country-GB": 2,
-  "country-JP": 1,
-  "country-SG": 3,
-  "country-AU": 1,
-  "search-uses": 27,
-  "prediction-uses": 77,
-};
-let manualCounterFloors: Record<string, number> = {};
-let counterFloorPromise: Promise<void> | undefined;
-const legacyUnattributedVisits = 13;
 const predictionDefaults: PredictionInputs = {
   salt: "LiPF6",
   concentration: 0.6,
@@ -165,203 +155,6 @@ const solventFiles: Record<string, string> = {
   "o-Xylene": "o-Xylene",
 };
 
-function counterName(name: string) {
-  const preview =
-    location.hostname === "localhost" || location.hostname === "127.0.0.1";
-  return `${preview ? "preview-" : ""}${name}`;
-}
-function counterFloor(name: string) {
-  return Math.max(counterSeeds[name] ?? 0, manualCounterFloors[name] ?? 0);
-}
-function loadCounterFloors() {
-  if (!counterFloorPromise) {
-    counterFloorPromise = fetch(`${base}counter-floors.json?fresh=${Date.now()}`, {
-      cache: "no-store",
-    })
-      .then((response) => {
-        if (!response.ok) throw new Error(String(response.status));
-        return response.json();
-      })
-      .then((data) => {
-        if (data && typeof data === "object") {
-          manualCounterFloors = Object.fromEntries(
-            Object.entries(data).filter(
-              ([, value]) => Number.isInteger(value) && Number(value) >= 0,
-            ),
-          ) as Record<string, number>;
-        }
-      })
-      .catch(() => {});
-  }
-  return counterFloorPromise;
-}
-async function readCounter(name: string) {
-  await loadCounterFloors();
-  const key = `scan-counter-${counterName(name)}`;
-  const cached = Math.max(
-    Number(localStorage.getItem(key) ?? 0),
-    counterFloor(name),
-  );
-  const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 4500);
-  try {
-    const r = await fetch(
-      `${counterBase}/${counterName(name)}?fresh=${Date.now()}`,
-      { cache: "no-store", signal: controller.signal },
-    );
-    if (!r.ok) throw new Error(String(r.status));
-    const d = await r.json();
-    const value = Math.max(cached, Number(d.count ?? d.value ?? 0));
-    localStorage.setItem(key, String(value));
-    return value;
-  } catch {
-    return cached;
-  } finally {
-    window.clearTimeout(timeout);
-  }
-}
-async function readReachCounters() {
-  const results = new Array<ReachPoint>(reachRegions.length);
-  let nextIndex = 0;
-  const worker = async () => {
-    while (nextIndex < reachRegions.length) {
-      const index = nextIndex;
-      nextIndex += 1;
-      const region = reachRegions[index];
-      results[index] = {
-        ...region,
-        count: await readCounter(`country-${region.code}`),
-      };
-    }
-  };
-  await Promise.all(Array.from({ length: 24 }, worker));
-  return results.filter((point) => point.count > 0);
-}
-async function bumpCounter(
-  name: string,
-  localAlreadyIncremented = false,
-  isRetry = false,
-) {
-  const key = `scan-counter-${counterName(name)}`;
-  const pendingKey = `scan-counter-pending-${counterName(name)}`;
-  if (!localAlreadyIncremented) {
-    const next =
-      Math.max(Number(localStorage.getItem(key) ?? 0), counterFloor(name)) + 1;
-    localStorage.setItem(key, String(next));
-  }
-  if (!isRetry) {
-    localStorage.setItem(
-      pendingKey,
-      String(Number(localStorage.getItem(pendingKey) ?? 0) + 1),
-    );
-  }
-  try {
-    const r = await fetch(`${counterBase}/${counterName(name)}/up`);
-    if (!r.ok) throw new Error(String(r.status));
-    const d = await r.json();
-    const value = Math.max(
-      Number(localStorage.getItem(key) ?? 0),
-      Number(d.count ?? d.value ?? 0),
-    );
-    localStorage.setItem(key, String(value));
-    const pending = Math.max(
-      0,
-      Number(localStorage.getItem(pendingKey) ?? 1) - 1,
-    );
-    if (pending) localStorage.setItem(pendingKey, String(pending));
-    else localStorage.removeItem(pendingKey);
-    return value;
-  } catch (error) {
-    throw error;
-  }
-}
-async function flushPendingCounters() {
-  const prefix = "scan-counter-pending-";
-  const pending = Object.keys(localStorage)
-    .filter((key) => key.startsWith(prefix))
-    .map((key) => ({
-      name: key.slice(prefix.length),
-      count: Math.min(10, Number(localStorage.getItem(key) ?? 0)),
-    }));
-  for (const item of pending) {
-    for (let i = 0; i < item.count; i += 1) {
-      try {
-        await bumpCounter(item.name, true, true);
-      } catch {
-        break;
-      }
-    }
-  }
-}
-async function requestCountryCode(
-  url: string,
-  parse: (response: Response) => Promise<string | undefined>,
-) {
-  const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 3500);
-  try {
-    const response = await fetch(url, {
-      cache: "no-store",
-      signal: controller.signal,
-    });
-    if (!response.ok) return undefined;
-    const code = (await parse(response))?.trim().toUpperCase();
-    return code && /^[A-Z]{2}$/.test(code) ? code : undefined;
-  } catch {
-    return undefined;
-  } finally {
-    window.clearTimeout(timeout);
-  }
-}
-async function detectCountryCode() {
-  const providers = [
-    () =>
-      requestCountryCode("https://api.country.is/", async (response) => {
-        const data = await response.json();
-        return data.country;
-      }),
-    () =>
-      requestCountryCode("https://ipwho.is/", async (response) => {
-        const data = await response.json();
-        return data.success === false ? undefined : data.country_code;
-      }),
-    () =>
-      requestCountryCode("https://ipapi.co/country/", (response) =>
-        response.text(),
-      ),
-  ];
-  for (const provider of providers) {
-    const code = await provider();
-    if (code) return code;
-  }
-  return undefined;
-}
-function useCounter(name: string) {
-  const key = `scan-counter-${counterName(name)}`;
-  const [count, setCount] = useState(() =>
-    Math.max(Number(localStorage.getItem(key) ?? 0), counterFloor(name)),
-  );
-  useEffect(() => {
-    readCounter(name)
-      .then(setCount)
-      .catch(() => {});
-  }, [name, key]);
-  return {
-    count,
-    bump: async () => {
-      setCount((current) => {
-        const next = current + 1;
-        localStorage.setItem(key, String(next));
-        return next;
-      });
-      try {
-        setCount(await bumpCounter(name, true));
-      } catch {
-        /* keep the optimistic count */
-      }
-    },
-  };
-}
 function Field({
   label,
   children,
@@ -394,22 +187,29 @@ function Select({
 function AnyOption() {
   return <option value="">Any</option>;
 }
-function UsageCounter({ label, count }: { label: string; count: number }) {
+function UsageCounter({ label, count }: { label: string; count?: number }) {
   return (
     <div className="usage-counter">
       <span>{label}</span>
-      <strong>{count.toLocaleString()}</strong>
-      <small>total uses</small>
+      <strong>{count === undefined ? "…" : count.toLocaleString()}</strong>
+      <small>{count === undefined ? "syncing securely" : "verified total uses"}</small>
     </div>
   );
 }
 
-function PredictionPanel({ catalog }: { catalog: Catalog }) {
+function PredictionPanel({
+  catalog,
+  usageCount,
+  onUsage,
+}: {
+  catalog: Catalog;
+  usageCount?: number;
+  onUsage: () => void;
+}) {
   const [x, setX] = useState(predictionDefaults);
   const [busy, setBusy] = useState(false);
   const [prediction, setPrediction] = useState<number>();
   const [message, setMessage] = useState("");
-  const usage = useCounter("prediction-uses");
   const ratio2 = +(1 - x.ratio1).toFixed(1);
   const set = <K extends keyof PredictionInputs>(
     k: K,
@@ -418,7 +218,7 @@ function PredictionPanel({ catalog }: { catalog: Catalog }) {
   async function predict() {
     setBusy(true);
     setMessage("Running the trained dynamic-routing model in your browser…");
-    usage.bump();
+    onUsage();
     try {
       const r1 = catalog.solvents[x.solvent1].map(
         (v, i) => v * x.ratio1 + catalog.solvents[x.solvent2][i] * ratio2,
@@ -560,12 +360,20 @@ function PredictionPanel({ catalog }: { catalog: Catalog }) {
           </p>
         </div>
       </div>
-      <UsageCounter label="Conductivity predictions" count={usage.count} />
+      <UsageCounter label="Conductivity predictions" count={usageCount} />
     </>
   );
 }
 
-function SearchPanel({ catalog }: { catalog: Catalog }) {
+function SearchPanel({
+  catalog,
+  usageCount,
+  onUsage,
+}: {
+  catalog: Catalog;
+  usageCount?: number;
+  onUsage: () => void;
+}) {
   const [x, setX] = useState(searchDefaults);
   const [busy, setBusy] = useState(false);
   const [rows, setRows] = useState<Result[]>([]);
@@ -573,7 +381,6 @@ function SearchPanel({ catalog }: { catalog: Catalog }) {
     "Select one or more filters. Unspecified fields match any value.",
   );
   const [total, setTotal] = useState(0);
-  const usage = useCounter("search-uses");
   const set = <K extends keyof SearchInputs>(k: K, v: SearchInputs[K]) =>
     setX((s) => ({ ...s, [k]: v }));
   async function search() {
@@ -588,7 +395,7 @@ function SearchPanel({ catalog }: { catalog: Catalog }) {
     setRows([]);
     setTotal(0);
     setMessage("Querying the optimized conductivity index…");
-    usage.bump();
+    onUsage();
     try {
       const duckdb = await import("@duckdb/duckdb-wasm");
       const bundle = await duckdb.selectBundle(duckdb.getJsDelivrBundles());
@@ -782,7 +589,7 @@ function SearchPanel({ catalog }: { catalog: Catalog }) {
           </div>
         </div>
       </div>
-      <UsageCounter label="Atlas searches" count={usage.count} />
+      <UsageCounter label="Atlas searches" count={usageCount} />
     </>
   );
 }
@@ -868,24 +675,24 @@ function Molecules({ catalog }: { catalog: Catalog }) {
   );
 }
 
-function GlobalReach() {
-  const [points, setPoints] = useState<ReachPoint[]>(() =>
-    reachRegions
-      .map((region) => ({
-        ...region,
-        count: Number(
-          localStorage.getItem(`scan-counter-country-${region.code}`) ??
-            counterSeeds[`country-${region.code}`] ??
-            0,
-        ),
-      }))
-      .filter((point) => point.count > 0),
-  );
-  useEffect(() => {
-    readReachCounters().then(setPoints).catch(() => {});
-  }, []);
-  const visits =
-    legacyUnattributedVisits + points.reduce((sum, point) => sum + point.count, 0);
+function GlobalReach({
+  summary,
+  status,
+}: {
+  summary?: AnalyticsSummary;
+  status: "loading" | "live" | "unavailable";
+}) {
+  const regionByCode = new Map(reachRegions.map((region) => [region.code, region]));
+  const points = (summary?.countries ?? [])
+    .map(({ code, count }) => {
+      const region = regionByCode.get(code);
+      return region ? { ...region, count } : undefined;
+    })
+    .filter((point): point is ReachPoint => Boolean(point && point.count > 0))
+    .sort((a, b) => b.count - a.count);
+  const unattributed =
+    summary?.countries.find((country) => country.code === "ZZ")?.count ?? 0;
+  const visits = summary?.totalViews;
   const max = Math.max(1, ...points.map((p) => p.count));
   return (
     <section className="analytics">
@@ -893,21 +700,21 @@ function GlobalReach() {
         <span className="eyebrow">GLOBAL REACH</span>
         <h2>Where SCAN is being read.</h2>
         <p>
-          Country-level counts are aggregated across visitors. The site stores
-          only a country code counter—never an IP address or exact location.
+          Country-level totals are written atomically by a private analytics
+          service. The browser cannot set or edit any counter.
         </p>
       </div>
       <div className="metrics analytics-metrics">
         <div>
-          <b>{visits.toLocaleString()}</b>
+          <b>{visits === undefined ? "…" : visits.toLocaleString()}</b>
           <span>recorded visits</span>
         </div>
         <div>
-          <b>{points.length}</b>
+          <b>{summary ? points.length : "…"}</b>
           <span>countries represented</span>
         </div>
         <div>
-          <b>{visits.toLocaleString()}</b>
+          <b>{visits === undefined ? "…" : visits.toLocaleString()}</b>
           <span>country observations</span>
         </div>
       </div>
@@ -944,25 +751,35 @@ function GlobalReach() {
           ))}
         </ComposableMap>
         <div className="country-list">
-          {points
-            .sort((a, b) => b.count - a.count)
-            .map((p) => (
+          {points.map((p) => (
               <div key={p.code}>
                 <span>{p.name}</span>
                 <strong>{p.count}</strong>
               </div>
             ))}
-          <div>
-            <span>Unattributed legacy visits</span>
-            <strong>{legacyUnattributedVisits}</strong>
-          </div>
+          {unattributed > 0 && (
+            <div>
+              <span>Unattributed visits</span>
+              <strong>{unattributed}</strong>
+            </div>
+          )}
         </div>
         <div className="map-note">
           <BarChart3 size={18} />
           <span>
-            <b>Live cumulative counts · all ISO countries checked on entry</b>
-            Dots grow with visitor count. City and IP-level histories are
-            intentionally not retained.
+            <b>
+              {status === "live"
+                ? `Live verified totals · private atomic storage${
+                    summary?.verifiedSince
+                      ? ` · since ${new Date(summary.verifiedSince).toLocaleDateString("en-US")}`
+                      : ""
+                  }`
+                : status === "loading"
+                  ? "Connecting to the secure analytics service…"
+                  : "Analytics service is temporarily unavailable"}
+            </b>
+            Country is assigned by the server. Raw IP addresses and city-level
+            histories are not stored.
           </span>
         </div>
       </div>
@@ -973,17 +790,53 @@ function GlobalReach() {
 function App() {
   const [catalog, setCatalog] = useState<Catalog>();
   const [page, setPage] = useState("home");
+  const [analytics, setAnalytics] = useState<AnalyticsSummary>();
+  const [analyticsStatus, setAnalyticsStatus] = useState<
+    "loading" | "live" | "unavailable"
+  >("loading");
   useEffect(() => {
     fetch(`${base}features.json`)
       .then((r) => r.json())
       .then(setCatalog);
-    flushPendingCounters().catch(() => {});
-    detectCountryCode()
-      .then((countryCode) => {
-        if (countryCode) bumpCounter(`country-${countryCode}`);
-      })
-      .catch(() => {});
+    let active = true;
+    const connect = async () => {
+      if (!analyticsConfigured()) {
+        if (active) setAnalyticsStatus("unavailable");
+        return;
+      }
+      try {
+        const summary = await recordAnalyticsEvent("page_view");
+        if (active && summary) {
+          setAnalytics(summary);
+          setAnalyticsStatus("live");
+        }
+      } catch {
+        try {
+          const summary = await readAnalytics();
+          if (active && summary) {
+            setAnalytics(summary);
+            setAnalyticsStatus("live");
+          }
+        } catch {
+          if (active) setAnalyticsStatus("unavailable");
+        }
+      }
+    };
+    connect();
+    return () => {
+      active = false;
+    };
   }, []);
+  const trackUsage = (type: AnalyticsEvent) => {
+    recordAnalyticsEvent(type)
+      .then((summary) => {
+        if (summary) {
+          setAnalytics(summary);
+          setAnalyticsStatus("live");
+        }
+      })
+      .catch(() => setAnalyticsStatus("unavailable"));
+  };
   const nav = useMemo(
     () => [
       ["home", "Overview"],
@@ -1160,7 +1013,11 @@ function App() {
                 fields match any value.
               </p>
             </div>
-            <SearchPanel catalog={catalog} />
+            <SearchPanel
+              catalog={catalog}
+              usageCount={analytics?.searchUses}
+              onUsage={() => trackUsage("search")}
+            />
           </div>
         )}
         {page === "predict" && (
@@ -1170,7 +1027,11 @@ function App() {
               <h1>Predict a formulation.</h1>
               <p>The trained SCAN model runs locally with ONNX Runtime Web.</p>
             </div>
-            <PredictionPanel catalog={catalog} />
+            <PredictionPanel
+              catalog={catalog}
+              usageCount={analytics?.predictionUses}
+              onUsage={() => trackUsage("prediction")}
+            />
           </div>
         )}
         {page === "molecules" && (
@@ -1180,7 +1041,7 @@ function App() {
         )}
         {page === "reach" && (
           <div className="page">
-            <GlobalReach />
+            <GlobalReach summary={analytics} status={analyticsStatus} />
           </div>
         )}
         {page === "advanced" && (
