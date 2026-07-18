@@ -92,9 +92,15 @@ const searchDefaults: SearchInputs = {
   solventUnit: "w",
   temperature: "300",
 };
+const chinaRegionNames: Record<string, string> = {
+  HK: "Hong Kong, China",
+  TW: "Taiwan, China",
+  MO: "Macao, China",
+};
 const reachRegions: Omit<ReachPoint, "count">[] = reachRegionsData.map(
   (region) => ({
     ...region,
+    name: chinaRegionNames[region.code] ?? region.name,
     coordinates: [...region.coordinates] as [number, number],
   }),
 );
