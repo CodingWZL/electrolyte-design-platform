@@ -25,7 +25,9 @@ jobs:
         with:
           node-version: 22
       - name: Validate worker
-        run: node --check analytics-worker/src/index.js
+        run: |
+          node --check analytics-worker/src/index.js
+          node --test analytics-worker/test/migration.test.mjs
       - name: Deploy Worker and Durable Object
         id: deploy
         env:

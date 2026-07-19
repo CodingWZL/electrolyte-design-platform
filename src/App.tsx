@@ -26,6 +26,9 @@ import {
   Geography,
   Marker,
 } from "react-simple-maps";
+import { AdvancedStudio } from "./studio/AdvancedStudio";
+import { MolecularStudio } from "./studio/MolecularStudio";
+import type { StudioToolId } from "./studio/types";
 
 type Catalog = {
   salts: Record<string, number[]>;
@@ -600,7 +603,7 @@ function SearchPanel({
   );
 }
 
-function Molecules({ catalog }: { catalog: Catalog }) {
+function ScanMoleculeLibrary({ catalog }: { catalog: Catalog }) {
   const [kind, setKind] = useState<"solvents" | "salts">("solvents");
   const [name, setName] = useState("EC");
   const stage = useRef<HTMLDivElement>(null);
@@ -689,6 +692,7 @@ function GlobalReach({
   status: "loading" | "live" | "unavailable";
 }) {
   const regionByCode = new Map(reachRegions.map((region) => [region.code, region]));
+  const countByCode = new Map((summary?.countries ?? []).map((country) => [country.code, country]));
   const points = (summary?.countries ?? [])
     .map(({ code, count }) => {
       const region = regionByCode.get(code);
@@ -698,6 +702,27 @@ function GlobalReach({
     .sort((a, b) => b.count - a.count);
   const unattributed =
     summary?.countries.find((country) => country.code === "ZZ")?.count ?? 0;
+  const chinaCodes = ["CN", "HK", "TW", "MO"];
+  const chinaCount = chinaCodes.reduce((sum, code) => sum + (countByCode.get(code)?.count ?? 0), 0);
+  const chinaRecent7 = chinaCodes.reduce((sum, code) => sum + (countByCode.get(code)?.recent7 ?? 0), 0);
+  const chinaRecent30 = chinaCodes.reduce((sum, code) => sum + (countByCode.get(code)?.recent30 ?? 0), 0);
+  const chinaLastSeenValues = chinaCodes
+    .map((code) => countByCode.get(code)?.lastSeen)
+    .filter((value): value is string => Boolean(value))
+    .sort();
+  const chinaLastSeen = chinaLastSeenValues[chinaLastSeenValues.length - 1];
+  const sovereignCountries = (summary?.countries ?? []).filter(
+    ({ code, count }) => count > 0 && code !== "ZZ" && !["HK", "TW", "MO"].includes(code),
+  );
+  const listedCountries = sovereignCountries
+    .map((country) => ({
+      ...country,
+      ...(country.code === "CN"
+        ? { count: chinaCount, recent7: chinaRecent7, recent30: chinaRecent30, lastSeen: chinaLastSeen }
+        : {}),
+      name: country.code === "CN" ? "China (including Hong Kong, Taiwan & Macao)" : regionByCode.get(country.code)?.name ?? country.code,
+    }))
+    .sort((a, b) => b.count - a.count);
   const visits = summary?.totalViews;
   const max = Math.max(1, ...points.map((p) => p.count));
   return (
@@ -716,7 +741,7 @@ function GlobalReach({
           <span>recorded visits</span>
         </div>
         <div>
-          <b>{summary ? points.length : "…"}</b>
+          <b>{summary ? sovereignCountries.length : "…"}</b>
           <span>countries represented</span>
         </div>
         <div>
@@ -757,12 +782,13 @@ function GlobalReach({
           ))}
         </ComposableMap>
         <div className="country-list">
-          {points.map((p) => (
-              <div key={p.code}>
-                <span>{p.name}</span>
-                <strong>{p.count}</strong>
-              </div>
-            ))}
+          {listedCountries.map((country) => (
+            <div key={country.code} className={country.code === "CN" ? "china-total" : ""}>
+              <span>{country.name}<small>{country.recent30 ?? 0} in 30 days · {country.recent7 ?? 0} in 7 days{country.lastSeen ? ` · last ${new Date(country.lastSeen).toLocaleDateString("en-US")}` : " · historical baseline"}</small></span>
+              <strong>{country.count}</strong>
+              {country.code === "CN" && <details><summary>Regional breakdown</summary>{chinaCodes.map((code) => <p key={code}>{regionByCode.get(code)?.name ?? code}: {countByCode.get(code)?.count ?? 0}</p>)}</details>}
+            </div>
+          ))}
           {unattributed > 0 && (
             <div>
               <span>Unattributed visits</span>
@@ -785,7 +811,8 @@ function GlobalReach({
                   : "Analytics service is temporarily unavailable"}
             </b>
             Country is assigned by the server. Raw IP addresses and city-level
-            histories are not stored.
+            histories are not stored. Recent activity begins with this release;
+            historical totals remain cumulative across deployments.
           </span>
         </div>
       </div>
@@ -843,6 +870,7 @@ function App() {
       })
       .catch(() => setAnalyticsStatus("unavailable"));
   };
+  const trackStudioUse = (type: StudioToolId) => trackUsage(type);
   const nav = useMemo(
     () => [
       ["home", "Overview"],
@@ -1042,7 +1070,11 @@ function App() {
         )}
         {page === "molecules" && (
           <div className="page">
-            <Molecules catalog={catalog} />
+            <MolecularStudio
+              library={<ScanMoleculeLibrary catalog={catalog} />}
+              usage={analytics?.featureUses}
+              onUse={trackStudioUse}
+            />
           </div>
         )}
         {page === "reach" && (
@@ -1052,41 +1084,7 @@ function App() {
         )}
         {page === "advanced" && (
           <div className="page">
-            <div className="section-title">
-              <span className="eyebrow">ADVANCED LAB</span>
-              <h1>A home for what comes next.</h1>
-              <p>
-                A modular extension surface for community data, model training,
-                simulation-box construction and conductivity calculation.
-              </p>
-            </div>
-            <div className="advanced-grid">
-              {[
-                [
-                  "Community data",
-                  "Upload, validate and version contributed measurements.",
-                ],
-                [
-                  "Model studio",
-                  "Fine-tune small models against private or shared data.",
-                ],
-                [
-                  "Simulation builder",
-                  "Calculate molecule counts and prepare simulation boxes.",
-                ],
-                [
-                  "Conductivity calculator",
-                  "Convert diffusion coefficients into ionic conductivity.",
-                ],
-              ].map(([a, b], i) => (
-                <article key={a}>
-                  <span>0{i + 1}</span>
-                  <h3>{a}</h3>
-                  <p>{b}</p>
-                  <button disabled>Planned</button>
-                </article>
-              ))}
-            </div>
+            <AdvancedStudio usage={analytics?.featureUses} onUse={trackStudioUse} />
           </div>
         )}
       </main>

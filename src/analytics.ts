@@ -1,17 +1,24 @@
-export type AnalyticsEvent = "page_view" | "search" | "prediction";
+import type { FeatureUses, StudioToolId } from "./studio/types";
+
+export type AnalyticsEvent = "page_view" | "search" | "prediction" | StudioToolId;
 
 export type CountryCount = {
   code: string;
   count: number;
+  recent7?: number;
+  recent30?: number;
+  lastSeen?: string;
 };
 
 export type AnalyticsSummary = {
   totalViews: number;
   searchUses: number;
   predictionUses: number;
+  featureUses: FeatureUses;
   countries: CountryCount[];
   updatedAt: string;
   verifiedSince: string | null;
+  detectedCountry?: string;
 };
 
 const endpoint = String(import.meta.env.VITE_ANALYTICS_ENDPOINT ?? "")
@@ -31,11 +38,11 @@ function isSummary(value: unknown): value is AnalyticsSummary {
   );
 }
 
-async function parseSummary(response: Response) {
+async function parseSummary(response: Response): Promise<AnalyticsSummary> {
   if (!response.ok) throw new Error(`Analytics request failed (${response.status})`);
   const data: unknown = await response.json();
   if (!isSummary(data)) throw new Error("Analytics response was invalid");
-  return data;
+  return { ...data, featureUses: data.featureUses ?? {} };
 }
 
 export function analyticsConfigured() {

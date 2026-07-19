@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://codingwzl.github.io/electrolyte-design-platform/sitemap.xml

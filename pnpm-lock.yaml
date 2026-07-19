@@ -11,6 +11,9 @@ importers:
       '@duckdb/duckdb-wasm':
         specifier: ^1.29.1-dev11.0
         version: 1.32.0
+      '@rdkit/rdkit':
+        specifier: 2025.3.4-1.0.0
+        version: 2025.3.4-1.0.0
       lucide-react:
         specifier: ^0.468.0
         version: 0.468.0(react@18.3.1)
@@ -335,6 +338,9 @@ packages:
 
   '@protobufjs/utf8@1.1.2':
     resolution: {integrity: sha512-b1UQwcEZ4yCnMCD8DAL1VlbvBJE9/IX4FTIp7BG1xYpf29SLazLSrqUkj4w7Y5y7cCVP6E5tcqqcI0xemPkHug==}
+
+  '@rdkit/rdkit@2025.3.4-1.0.0':
+    resolution: {integrity: sha512-MJzNoeW2SWt2KCdIibfY213uLWyHZjFfS2ntJ/HuYNHdu6dEiim7jb6ZMU9wnt9Oovkc85BHMuupxkufIMvftQ==}
 
   '@rolldown/pluginutils@1.0.0-beta.27':
     resolution: {integrity: sha512-+d0F4MKMCbeVUJwG96uQ4SgAznZNSq93I3V+9NHA4OpvqG8mRCpGdKmK8l/dl02h2CCDHwW2FqilnTyDcAnqjA==}
@@ -1145,6 +1151,8 @@ snapshots:
   '@protobufjs/pool@1.1.0': {}
 
   '@protobufjs/utf8@1.1.2': {}
+
+  '@rdkit/rdkit@2025.3.4-1.0.0': {}
 
   '@rolldown/pluginutils@1.0.0-beta.27': {}
 
