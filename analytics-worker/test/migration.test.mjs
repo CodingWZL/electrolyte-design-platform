@@ -44,12 +44,19 @@ test("legacy totals migrate once and continue incrementing", async () => {
     migrated.countries.reduce((sum, country) => sum + country.count, 0),
     migrated.totalViews,
   );
+  assert.equal(migrated.featureUses.eis_analyze, 0);
 
   await store.record({
     type: "page_view",
     eventId: "page-event",
     country: "US",
     sourceHash: "page-source",
+  });
+  await store.record({
+    type: "eis_analyze",
+    eventId: "eis-event",
+    country: "US",
+    sourceHash: "eis-source",
   });
   await store.record({
     type: "search",
@@ -68,6 +75,9 @@ test("legacy totals migrate once and continue incrementing", async () => {
   assert.equal(incremented.totalViews, 1002);
   assert.equal(incremented.searchUses, 226);
   assert.equal(incremented.predictionUses, 902);
+  assert.equal(incremented.featureUses.eis_analyze, 1);
+  assert.equal(incremented.countries.find((country) => country.code === "US").recent7, 1);
+  assert.match(incremented.countries.find((country) => country.code === "US").lastSeen, /^\d{4}-/);
   assert.equal(
     incremented.countries.reduce((sum, country) => sum + country.count, 0),
     incremented.totalViews,
