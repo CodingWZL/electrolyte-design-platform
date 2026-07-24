@@ -199,7 +199,7 @@ export class AnalyticsStore {
 
   async summary() {
     await this.ensureLegacyMigration();
-    const [pageViews, searchUses, predictionUses, verifiedSince, countryEntries, metricEntries, lastSeenEntries, dailyEntries] =
+    const [pageViews, searchUses, predictionUses, verifiedSince, countryEntries, metricEntries] =
       await Promise.all([
         this.storage.get("metric:page_view"),
         this.storage.get("metric:search"),
@@ -207,33 +207,12 @@ export class AnalyticsStore {
         this.storage.get("metadata:verified_since"),
         this.storage.list({ prefix: "country:" }),
         this.storage.list({ prefix: "metric:" }),
-        this.storage.list({ prefix: "last_seen:" }),
-        this.storage.list({ prefix: "daily:" }),
       ]);
-    const now = new Date();
-    const dateKey = (offset) => new Date(now.getTime() - offset * 24 * HOUR).toISOString().slice(0, 10);
-    const recent7Keys = new Set(Array.from({ length: 7 }, (_, index) => dateKey(index)));
-    const recent30Keys = new Set(Array.from({ length: 30 }, (_, index) => dateKey(index)));
-    const recent7 = new Map();
-    const recent30 = new Map();
-    for (const [key, count] of dailyEntries) {
-      const [, date, code] = key.split(":");
-      if (!COUNTRY_PATTERN.test(code)) continue;
-      if (recent30Keys.has(date)) recent30.set(code, (recent30.get(code) ?? 0) + Number(count));
-      if (recent7Keys.has(date)) recent7.set(code, (recent7.get(code) ?? 0) + Number(count));
-    }
     const countries = Array.from(countryEntries.entries())
-      .map(([key, count]) => {
-        const code = key.slice(8);
-        const lastSeen = lastSeenEntries.get(`last_seen:${code}`);
-        return {
-          code,
-          count: Number(count),
-          recent7: recent7.get(code) ?? 0,
-          recent30: recent30.get(code) ?? 0,
-          ...(typeof lastSeen === "string" ? { lastSeen } : {}),
-        };
-      })
+      .map(([key, count]) => ({
+        code: key.slice(8),
+        count: Number(count),
+      }))
       .filter(({ code, count }) => COUNTRY_PATTERN.test(code) && count > 0)
       .sort((a, b) => b.count - a.count || a.code.localeCompare(b.code));
     return {
@@ -279,13 +258,6 @@ export class AnalyticsStore {
         const countryKey = `country:${event.country}`;
         const count = Number((await transaction.get(countryKey)) ?? 0) + 1;
         await transaction.put(countryKey, count);
-        const today = new Date(now).toISOString().slice(0, 10);
-        const dailyKey = `daily:${today}:${event.country}`;
-        const dailyCount = Number((await transaction.get(dailyKey)) ?? 0) + 1;
-        await transaction.put(dailyKey, dailyCount, {
-          expiration: Math.floor((now + 400 * 24 * HOUR) / 1000),
-        });
-        await transaction.put(`last_seen:${event.country}`, new Date(now).toISOString());
       }
       return { recorded: true };
     });

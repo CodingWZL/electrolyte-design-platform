@@ -5,9 +5,6 @@ export type AnalyticsEvent = "page_view" | "search" | "prediction" | StudioToolI
 export type CountryCount = {
   code: string;
   count: number;
-  recent7?: number;
-  recent30?: number;
-  lastSeen?: string;
 };
 
 export type AnalyticsSummary = {

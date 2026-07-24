@@ -76,8 +76,7 @@ test("legacy totals migrate once and continue incrementing", async () => {
   assert.equal(incremented.searchUses, 226);
   assert.equal(incremented.predictionUses, 902);
   assert.equal(incremented.featureUses.eis_analyze, 1);
-  assert.equal(incremented.countries.find((country) => country.code === "US").recent7, 1);
-  assert.match(incremented.countries.find((country) => country.code === "US").lastSeen, /^\d{4}-/);
+  assert.equal(incremented.countries.find((country) => country.code === "US").count, 245);
   assert.equal(
     incremented.countries.reduce((sum, country) => sum + country.count, 0),
     incremented.totalViews,

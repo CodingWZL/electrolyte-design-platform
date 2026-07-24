@@ -9,7 +9,7 @@ A browser-native research interface for the SCAN non-aqueous electrolyte project
 - Interactively rotate and inspect the published salt and solvent structures with 3Dmol.js.
 - Convert arbitrary SMILES into validated 2D structures, canonical identifiers, MOL/SVG files, RDKit descriptors, and Morgan fingerprints.
 - Search a general electrolyte-component encyclopedia and use browser-native formulation, mixture DoE, EIS, transport, Bruce–Vincent, Arrhenius/VTF, simulation-box, dataset-quality, and Pareto-analysis utilities.
-- Record page views and successful tool uses through a private Cloudflare Durable Object. Country totals include recent 7/30-day activity and last-seen evidence; the public site has no counter-setting endpoint or analytics secret.
+- Record page views and successful tool uses through a private Cloudflare Durable Object. Country values are cumulative all-time totals; the public site has no counter-setting endpoint or analytics secret.
 
 The scientific source, training code, and original data are maintained in [CodingWZL/SCAN](https://github.com/CodingWZL/SCAN).
 
@@ -44,9 +44,9 @@ workflow token cannot create or update Actions variables.
 The service intentionally has no public admin, set, reset, or correction route.
 Country comes from Cloudflare's request metadata. Raw IP addresses are never
 stored; only short-lived salted hashes are used to constrain abusive traffic.
-China, Hong Kong, Taiwan, and Macao remain separate server codes for auditability
-but are aggregated under China in the public sovereign-country total, with a
-visible regional breakdown.
+China, Hong Kong, Taiwan, and Macao remain separate server codes internally for
+auditability but are aggregated into one cumulative China total in the public
+country list.
 
 The first private deployment includes a one-time monotonic migration of the
 last recoverable CounterAPI totals and published country floors. It never

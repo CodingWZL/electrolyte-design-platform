@@ -693,36 +693,30 @@ function GlobalReach({
 }) {
   const regionByCode = new Map(reachRegions.map((region) => [region.code, region]));
   const countByCode = new Map((summary?.countries ?? []).map((country) => [country.code, country]));
-  const points = (summary?.countries ?? [])
-    .map(({ code, count }) => {
-      const region = regionByCode.get(code);
-      return region ? { ...region, count } : undefined;
-    })
-    .filter((point): point is ReachPoint => Boolean(point && point.count > 0))
-    .sort((a, b) => b.count - a.count);
   const unattributed =
     summary?.countries.find((country) => country.code === "ZZ")?.count ?? 0;
   const chinaCodes = ["CN", "HK", "TW", "MO"];
   const chinaCount = chinaCodes.reduce((sum, code) => sum + (countByCode.get(code)?.count ?? 0), 0);
-  const chinaRecent7 = chinaCodes.reduce((sum, code) => sum + (countByCode.get(code)?.recent7 ?? 0), 0);
-  const chinaRecent30 = chinaCodes.reduce((sum, code) => sum + (countByCode.get(code)?.recent30 ?? 0), 0);
-  const chinaLastSeenValues = chinaCodes
-    .map((code) => countByCode.get(code)?.lastSeen)
-    .filter((value): value is string => Boolean(value))
-    .sort();
-  const chinaLastSeen = chinaLastSeenValues[chinaLastSeenValues.length - 1];
-  const sovereignCountries = (summary?.countries ?? []).filter(
-    ({ code, count }) => count > 0 && code !== "ZZ" && !["HK", "TW", "MO"].includes(code),
-  );
-  const listedCountries = sovereignCountries
+  const listedCountries = (summary?.countries ?? [])
+    .filter(
+      ({ code, count }) =>
+        count > 0 && code !== "ZZ" && !["HK", "TW", "MO"].includes(code),
+    )
     .map((country) => ({
       ...country,
-      ...(country.code === "CN"
-        ? { count: chinaCount, recent7: chinaRecent7, recent30: chinaRecent30, lastSeen: chinaLastSeen }
-        : {}),
-      name: country.code === "CN" ? "China (including Hong Kong, Taiwan & Macao)" : regionByCode.get(country.code)?.name ?? country.code,
+      count: country.code === "CN" ? chinaCount : country.count,
+      name:
+        country.code === "CN"
+          ? "China"
+          : regionByCode.get(country.code)?.name ?? country.code,
     }))
     .sort((a, b) => b.count - a.count);
+  const points = listedCountries
+    .map(({ code, count }) => {
+      const region = regionByCode.get(code);
+      return region ? { ...region, count } : undefined;
+    })
+    .filter((point): point is ReachPoint => Boolean(point && point.count > 0));
   const visits = summary?.totalViews;
   const max = Math.max(1, ...points.map((p) => p.count));
   return (
@@ -741,12 +735,16 @@ function GlobalReach({
           <span>recorded visits</span>
         </div>
         <div>
-          <b>{summary ? sovereignCountries.length : "…"}</b>
+          <b>{summary ? listedCountries.length : "…"}</b>
           <span>countries represented</span>
         </div>
         <div>
-          <b>{visits === undefined ? "…" : visits.toLocaleString()}</b>
-          <span>country observations</span>
+          <b>
+            {visits === undefined
+              ? "…"
+              : Math.max(0, visits - unattributed).toLocaleString()}
+          </b>
+          <span>attributed country visits</span>
         </div>
       </div>
       <div className="map-card">
@@ -783,10 +781,9 @@ function GlobalReach({
         </ComposableMap>
         <div className="country-list">
           {listedCountries.map((country) => (
-            <div key={country.code} className={country.code === "CN" ? "china-total" : ""}>
-              <span>{country.name}<small>{country.recent30 ?? 0} in 30 days · {country.recent7 ?? 0} in 7 days{country.lastSeen ? ` · last ${new Date(country.lastSeen).toLocaleDateString("en-US")}` : " · historical baseline"}</small></span>
+            <div key={country.code}>
+              <span>{country.name}</span>
               <strong>{country.count}</strong>
-              {country.code === "CN" && <details><summary>Regional breakdown</summary>{chinaCodes.map((code) => <p key={code}>{regionByCode.get(code)?.name ?? code}: {countByCode.get(code)?.count ?? 0}</p>)}</details>}
             </div>
           ))}
           {unattributed > 0 && (
@@ -811,8 +808,8 @@ function GlobalReach({
                   : "Analytics service is temporarily unavailable"}
             </b>
             Country is assigned by the server. Raw IP addresses and city-level
-            histories are not stored. Recent activity begins with this release;
-            historical totals remain cumulative across deployments.
+            histories are not stored. Every country value is a cumulative
+            all-time total and remains cumulative across deployments.
           </span>
         </div>
       </div>
