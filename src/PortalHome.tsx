@@ -48,8 +48,8 @@ const platforms = [
     name: "IonNet",
     type: "Solid-state fast-ion conductors",
     description:
-      "Explore computational and experimental conductor data, Materials Project candidates and ensemble substitution predictions.",
-    metrics: ["8,750 computed", "398 experiments", "207,980 predictions"],
+      "Search experimental, computational, single- and double-substitution data, then predict ionic conductivity directly from a formula.",
+    metrics: ["8,750 computed", "624,460 single", "207,980 double"],
     icon: Atom,
     tone: "solid",
   },
@@ -73,13 +73,13 @@ export function PortalHome({
             <em>Many chemical spaces.</em>
           </h1>
           <p>
-            SCAN connects peer-reviewed models, published datasets and
+            AI for Battery connects peer-reviewed models, published datasets and
             interactive scientific tools across liquid and solid electrolytes.
             Each publication opens into its own focused platform.
           </p>
         </div>
         <div className="portal-orbit" aria-hidden="true">
-          <div className="orbit-core">SCAN</div>
+          <div className="orbit-core">AI</div>
           <span className="orbit-node orbit-node-liquid">Liquid</span>
           <span className="orbit-node orbit-node-solid">Solid</span>
         </div>
@@ -105,9 +105,9 @@ export function PortalHome({
             >
               <div className="publication-number">0{index + 1}</div>
               <div>
-                <span className="publication-journal">
+                <strong className="publication-journal">
                   {publication.journal} · {publication.year}
-                </span>
+                </strong>
                 <h3>{publication.title}</h3>
                 <p>{publication.authors}</p>
                 <small>{publication.detail}</small>
@@ -159,9 +159,8 @@ export function PortalHome({
       <section className="portal-footnote">
         <BookOpen size={19} />
         <p>
-          Developed by Zhilong Wang and Fengqi You at the PEESE Lab, Cornell
-          University. Models and datasets remain linked to their source
-          publications and repositories.
+          Director: Dr. Zhilong Wang (
+          <a href="mailto:zhilongwang.ai@gmail.com">zhilongwang.ai@gmail.com</a>)
         </p>
       </section>
     </div>

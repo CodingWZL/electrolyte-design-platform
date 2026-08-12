@@ -911,7 +911,7 @@ function App() {
     setPage(destination);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
-  if (!catalog) return <div className="loading">Loading SCAN…</div>;
+  if (!catalog) return <div className="loading">Loading AI for Battery…</div>;
   const ionNetView = page.startsWith("ionnet-")
     ? (page.replace("ionnet-", "") as "home" | "data" | "predict")
     : undefined;
@@ -922,7 +922,7 @@ function App() {
     <>
       <header>
         <button className="brand" onClick={() => navigate("portal")}>
-          <span>SC</span> SCAN
+          <span>AI</span> AI for Battery
         </button>
         <nav>
           {nav.map(([id, label]) => (
@@ -1059,10 +1059,10 @@ function App() {
             </section>
             <footer>
               <div className="footer-primary">
-                <b>SCAN</b>
+                <b>AI for Battery</b>
                 <p>
-                  Developed by Zhilong Wang and Fengqi You at the PEESE Lab,
-                  Cornell University.
+                  Director: Dr. Zhilong Wang (
+                  <a href="mailto:zhilongwang.ai@gmail.com">zhilongwang.ai@gmail.com</a>)
                 </p>
                 <b>Contact</b>
                 <p>

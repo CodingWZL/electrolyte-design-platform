@@ -1,4 +1,4 @@
-# SCAN Electrolyte Design Platforms
+# AI for Battery
 
 A browser-native research portal for the SCAN liquid-electrolyte and IonNet
 solid-electrolyte projects.
@@ -8,7 +8,8 @@ solid-electrolyte projects.
 - Search the published 11,515,140-formulation conductivity atlas with salt, concentration, unit, solvent, ratio, and temperature controls.
 - Run the trained dynamic-routing conductivity model locally in the browser with ONNX Runtime Web.
 - Browse IonNet's 8,750 computational samples, 398 experimental records, and 4,582 screened Materials Project compounds.
-- Query all 207,980 published IonNet double-substitution ensemble predictions with candidate-level uncertainty.
+- Search 624,460 single-substitution candidates and 207,980 model-scored double substitutions through 100-row previews and on-demand Parquet queries.
+- Predict room-temperature ionic conductivity from a chemical formula with the ten published fine-tuned IonNet models, including log10 conductivity and ensemble uncertainty.
 - Interactively rotate and inspect the published salt and solvent structures with 3Dmol.js.
 - Convert arbitrary SMILES into validated 2D structures, canonical identifiers, MOL/SVG files, RDKit descriptors, and Morgan fingerprints.
 - Search a general electrolyte-component encyclopedia and use browser-native formulation, mixture DoE, EIS, transport, Bruce–Vincent, Arrhenius/VTF, simulation-box, dataset-quality, and Pareto-analysis utilities.

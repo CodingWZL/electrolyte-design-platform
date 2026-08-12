@@ -6,15 +6,22 @@ import {
   ChevronRight,
   Database,
   FlaskConical,
+  Gauge,
   Search,
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
+import { predictIonNet, type IonNetPrediction } from "./ionnetModel";
 
 const base = import.meta.env.BASE_URL;
 
 type IonNetView = "home" | "data" | "predict";
-type DatasetKind = "experimental" | "computational" | "materials";
+type DatasetKind =
+  | "experimental"
+  | "computational"
+  | "materials"
+  | "single"
+  | "double";
 
 type ExperimentalRow = {
   id: string;
@@ -26,7 +33,6 @@ type ExperimentalRow = {
   chemicalFamily: string;
   source: string;
 };
-
 type ComputationalRow = { formula: string; sic: number };
 type MaterialsRow = {
   mpId: string;
@@ -34,40 +40,62 @@ type MaterialsRow = {
   energyAboveHull: number;
   bandGap: number;
 };
-
-type PredictionRow = {
-  mpId: string;
-  parent: string;
-  candidate: string;
+type SingleSubstitutionRow = { mpId: string; parent: string; candidate: string };
+type DoubleSubstitutionRow = SingleSubstitutionRow & {
+  series: number;
   pSigma: number;
   uncertainty: number;
 };
-
-type DataRow = ExperimentalRow | ComputationalRow | MaterialsRow;
+type DataRow =
+  | ExperimentalRow
+  | ComputationalRow
+  | MaterialsRow
+  | SingleSubstitutionRow
+  | DoubleSubstitutionRow;
 
 const datasetMeta = {
   experimental: {
     label: "Experimental",
     count: 398,
     file: "experimental.json",
+    remoteQuery: false,
     description: "Room-temperature measurements with family and DOI provenance.",
   },
   computational: {
     label: "Computational",
     count: 8750,
-    file: "computational.json",
-    description: "Compositions and the published computational SIC target.",
+    file: "computational-preview.json",
+    parquet: "computational.parquet",
+    remoteQuery: true,
+    description: "Published computational training compositions and SIC targets.",
   },
   materials: {
     label: "Materials Project",
     count: 4582,
     file: "materials-project.json",
+    remoteQuery: false,
     description: "Screened Li-containing compounds with stability and band-gap data.",
+  },
+  single: {
+    label: "Single substitution",
+    count: 624460,
+    file: "single-substitution-preview.json",
+    parquet: "single-substitution.parquet",
+    remoteQuery: true,
+    description: "All released single-element substitution candidates.",
+  },
+  double: {
+    label: "Double substitution",
+    count: 207980,
+    file: "double-substitution-preview.json",
+    parquet: "double-substitution.parquet",
+    remoteQuery: true,
+    description: "Model-scored double substitutions from the four published sets.",
   },
 } as const;
 
 const datasetCache = new Map<DatasetKind, DataRow[]>();
-const predictionCache = new Map<number, PredictionRow[]>();
+let ionnetConnection: Promise<any> | undefined;
 
 async function loadDataset(kind: DatasetKind) {
   const cached = datasetCache.get(kind);
@@ -79,44 +107,55 @@ async function loadDataset(kind: DatasetKind) {
   return rows;
 }
 
-async function loadPredictionSeries(series: number) {
-  const cached = predictionCache.get(series);
-  if (cached) return cached;
-  const response = await fetch(
-    `${base}data/ionnet/predictions-${series}.json.gz`,
+async function getIonNetConnection() {
+  ionnetConnection ??= (async () => {
+    const duckdb = await import("@duckdb/duckdb-wasm");
+    const bundle = await duckdb.selectBundle(duckdb.getJsDelivrBundles());
+    const worker = await duckdb.createWorker(bundle.mainWorker!);
+    const db = new duckdb.AsyncDuckDB(
+      new duckdb.ConsoleLogger(duckdb.LogLevel.WARNING),
+      worker,
+    );
+    await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
+    return db.connect();
+  })();
+  return ionnetConnection;
+}
+
+async function queryLargeDataset(kind: DatasetKind, query: string) {
+  const meta = datasetMeta[kind];
+  if (!("parquet" in meta)) throw new Error("This dataset is searched locally.");
+  const connection = await getIonNetConnection();
+  const url = `${location.origin}${base}data/ionnet/${meta.parquet}`;
+  const escaped = query.trim().toLowerCase().replace(/'/g, "''");
+  const searchable =
+    kind === "computational"
+      ? "formula"
+      : kind === "single"
+        ? "concat_ws(' ', mpId, parent, candidate)"
+        : "concat_ws(' ', CAST(series AS VARCHAR), mpId, parent, candidate)";
+  const where = escaped ? `WHERE lower(${searchable}) LIKE '%${escaped}%'` : "";
+  const table = await connection.query(
+    `SELECT *, COUNT(*) OVER() AS total_matches FROM read_parquet('${url}') ${where} LIMIT 100`,
   );
-  if (!response.ok) {
-    throw new Error(`Prediction request failed (${response.status})`);
-  }
-  const buffer = await response.arrayBuffer();
-  const bytes = new Uint8Array(buffer);
-  const isGzip = bytes[0] === 0x1f && bytes[1] === 0x8b;
-  const text = isGzip
-    ? await new Response(
-        new Response(buffer).body!.pipeThrough(new DecompressionStream("gzip")),
-      ).text()
-    : new TextDecoder().decode(buffer);
-  const rows = JSON.parse(text) as PredictionRow[];
-  predictionCache.set(series, rows);
-  return rows;
+  const values = table.toArray().map((row: any) => row.toJSON());
+  return {
+    rows: values as DataRow[],
+    total: values.length ? Number(values[0].total_matches) : 0,
+  };
 }
 
 function formatScientific(value: number) {
   return value.toExponential(2).replace("e", " × 10^");
 }
 
-function IonNetOverview({
-  onNavigate,
-}: {
-  onNavigate: (view: IonNetView) => void;
-}) {
+function IonNetOverview({ onNavigate }: { onNavigate: (view: IonNetView) => void }) {
   return (
     <>
       <section className="ionnet-hero">
         <div>
           <span className="pill ionnet-pill">
-            <Sparkles size={14} /> Descriptor-guided transfer learning for
-            solid electrolytes
+            <Sparkles size={14} /> Descriptor-guided transfer learning for solid electrolytes
           </span>
           <h1>
             Decode fast-ion
@@ -124,13 +163,12 @@ function IonNetOverview({
             <em>conductor space.</em>
           </h1>
           <p>
-            IonNet connects multimodal composition descriptors, transfer
-            learning and substitution screening to navigate solid-state lithium
-            conductors at room temperature.
+            IonNet turns a chemical formula into a room-temperature ionic-conductivity
+            prediction using the published ten-model transfer-learning ensemble.
           </p>
           <div className="hero-actions">
             <button className="primary ionnet-primary" onClick={() => onNavigate("predict")}>
-              Explore predictions <ChevronRight size={17} />
+              Predict a formula <ChevronRight size={17} />
             </button>
             <button className="secondary" onClick={() => onNavigate("data")}>
               Search the data
@@ -146,68 +184,34 @@ function IonNetOverview({
           <div className="model-node">
             <Atom size={34} />
             <b>IonNet</b>
-            <small>ensemble prediction</small>
+            <small>10-model ensemble</small>
           </div>
         </div>
       </section>
       <section className="metrics ionnet-metrics">
-        <div>
-          <b>8,750</b>
-          <span>computational samples</span>
-        </div>
-        <div>
-          <b>398</b>
-          <span>experimental conductors</span>
-        </div>
-        <div>
-          <b>4,582</b>
-          <span>Materials Project compounds</span>
-        </div>
-        <div>
-          <b>207,980</b>
-          <span>double-substitution predictions</span>
-        </div>
+        <div><b>8,750</b><span>computational samples</span></div>
+        <div><b>398</b><span>experimental conductors</span></div>
+        <div><b>4,582</b><span>Materials Project compounds</span></div>
+        <div><b>624,460</b><span>single substitutions</span></div>
+        <div><b>207,980</b><span>double substitutions</span></div>
       </section>
       <section className="story ionnet-story">
         <div>
           <span className="eyebrow ionnet-eyebrow">WHY IONNET</span>
-          <h2>From composition to testable solid-electrolyte candidates.</h2>
+          <h2>From composition to a conductivity estimate with uncertainty.</h2>
         </div>
         <div className="feature-list">
-          <article>
-            <Database />
-            <h3>Search</h3>
-            <p>Move across computational, experimental and screening datasets.</p>
-          </article>
-          <article>
-            <FlaskConical />
-            <h3>Screen</h3>
-            <p>Rank substituted compounds by predicted conductivity and uncertainty.</p>
-          </article>
-          <article>
-            <ShieldCheck />
-            <h3>Trace</h3>
-            <p>Keep parent compositions, Materials Project IDs and source DOIs visible.</p>
-          </article>
+          <article><Database /><h3>Search</h3><p>Move across evidence and both substitution spaces without loading every row.</p></article>
+          <article><Gauge /><h3>Predict</h3><p>Generate descriptors from a formula and run all ten published models.</p></article>
+          <article><ShieldCheck /><h3>Quantify</h3><p>Report log₁₀ conductivity, physical conductivity and ensemble uncertainty.</p></article>
         </div>
       </section>
-      <a
-        className="citation ionnet-citation"
-        href="https://doi.org/10.1126/sciadv.aee4959"
-        target="_blank"
-        rel="noreferrer"
-      >
+      <a className="citation ionnet-citation" href="https://doi.org/10.1126/sciadv.aee4959" target="_blank" rel="noreferrer">
         <BookOpen />
         <div>
-          <span className="citation-label">CITE THIS WORK</span>
-          <h3>
-            Decoding the chemical space of fast-ion conductors via a
-            descriptor-guided transfer learning framework
-          </h3>
-          <p>
-            Zhilong Wang & Fengqi You · Science Advances 12, eaee4959 (2026) ·
-            doi:10.1126/sciadv.aee4959
-          </p>
+          <span className="citation-label">SCIENCE ADVANCES · 2026</span>
+          <h3>Decoding the chemical space of fast-ion conductors via a descriptor-guided transfer learning framework</h3>
+          <p>Zhilong Wang & Fengqi You · Science Advances 12, eaee4959 (2026) · doi:10.1126/sciadv.aee4959</p>
         </div>
         <ArrowUpRight />
       </a>
@@ -222,46 +226,58 @@ function IonNetDataExplorer({ onUse }: { onUse: () => void }) {
   const [family, setFamily] = useState("");
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
+  const [total, setTotal] = useState<number>(datasetMeta.experimental.count);
+  const [searched, setSearched] = useState(false);
 
   useEffect(() => {
     let active = true;
     setBusy(true);
     setError("");
+    setSearched(false);
+    setTotal(datasetMeta[kind].count);
     loadDataset(kind)
       .then((data) => active && setRows(data))
       .catch((cause) => active && setError(String(cause)))
       .finally(() => active && setBusy(false));
-    return () => {
-      active = false;
-    };
+    return () => { active = false; };
   }, [kind]);
 
   const families = useMemo(() => {
     if (kind !== "experimental") return [];
-    return Array.from(
-      new Set(
-        (rows as ExperimentalRow[]).map((row) => row.chemicalFamily).filter(Boolean),
-      ),
-    ).sort();
+    return Array.from(new Set((rows as ExperimentalRow[]).map((row) => row.chemicalFamily).filter(Boolean))).sort();
   }, [kind, rows]);
 
   const filtered = useMemo(() => {
+    if (datasetMeta[kind].remoteQuery) return rows;
     const normalized = query.trim().toLowerCase();
     return rows.filter((row) => {
-      const text =
-        kind === "experimental"
-          ? `${(row as ExperimentalRow).formula} ${(row as ExperimentalRow).structureFamily} ${(row as ExperimentalRow).chemicalFamily} ${(row as ExperimentalRow).source}`
-          : kind === "computational"
-            ? (row as ComputationalRow).formula
-            : `${(row as MaterialsRow).mpId} ${(row as MaterialsRow).formula}`;
-      const queryMatch = !normalized || text.toLowerCase().includes(normalized);
-      const familyMatch =
-        kind !== "experimental" ||
-        !family ||
-        (row as ExperimentalRow).chemicalFamily === family;
-      return queryMatch && familyMatch;
+      const text = kind === "experimental"
+        ? `${(row as ExperimentalRow).formula} ${(row as ExperimentalRow).structureFamily} ${(row as ExperimentalRow).chemicalFamily} ${(row as ExperimentalRow).source}`
+        : `${(row as MaterialsRow).mpId} ${(row as MaterialsRow).formula}`;
+      return (!normalized || text.toLowerCase().includes(normalized)) &&
+        (kind !== "experimental" || !family || (row as ExperimentalRow).chemicalFamily === family);
     });
   }, [family, kind, query, rows]);
+
+  async function runSearch() {
+    if (!datasetMeta[kind].remoteQuery) {
+      onUse();
+      return;
+    }
+    setBusy(true);
+    setError("");
+    onUse();
+    try {
+      const result = await queryLargeDataset(kind, query);
+      setRows(result.rows);
+      setTotal(result.total);
+      setSearched(true);
+    } catch (cause) {
+      setError(`Search unavailable: ${String(cause)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   function chooseKind(next: DatasetKind) {
     setKind(next);
@@ -270,17 +286,13 @@ function IonNetDataExplorer({ onUse }: { onUse: () => void }) {
     onUse();
   }
 
+  const visibleRows = filtered.slice(0, 100);
+  const shownTotal = datasetMeta[kind].remoteQuery ? total : filtered.length;
   return (
     <div className="ionnet-workspace">
-      <div className="dataset-tabs" role="tablist" aria-label="IonNet datasets">
+      <div className="dataset-tabs ionnet-dataset-tabs" role="tablist" aria-label="IonNet datasets">
         {(Object.keys(datasetMeta) as DatasetKind[]).map((id) => (
-          <button
-            key={id}
-            className={kind === id ? "active" : ""}
-            onClick={() => chooseKind(id)}
-            role="tab"
-            aria-selected={kind === id}
-          >
+          <button key={id} className={kind === id ? "active" : ""} onClick={() => chooseKind(id)} role="tab" aria-selected={kind === id}>
             <span>{datasetMeta[id].label}</span>
             <strong>{datasetMeta[id].count.toLocaleString()}</strong>
           </button>
@@ -291,277 +303,143 @@ function IonNetDataExplorer({ onUse }: { onUse: () => void }) {
         <input
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder={
-            kind === "materials"
-              ? "Search formula or Materials Project ID"
-              : "Search formula, family or source DOI"
-          }
+          onKeyDown={(event) => event.key === "Enter" && void runSearch()}
+          placeholder={kind === "experimental" ? "Search formula, family or source DOI" : "Search formula or Materials Project ID"}
           aria-label="Search IonNet data"
         />
         {kind === "experimental" && (
-          <select
-            value={family}
-            onChange={(event) => setFamily(event.target.value)}
-            aria-label="Chemical family"
-          >
+          <select value={family} onChange={(event) => setFamily(event.target.value)} aria-label="Chemical family">
             <option value="">All chemical families</option>
-            {families.map((item) => (
-              <option value={item} key={item}>
-                {item}
-              </option>
-            ))}
+            {families.map((item) => <option value={item} key={item}>{item}</option>)}
           </select>
+        )}
+        {datasetMeta[kind].remoteQuery && (
+          <button className="primary ionnet-query-button" onClick={() => void runSearch()} disabled={busy}>
+            {busy ? "Searching…" : "Search all records"}
+          </button>
         )}
       </div>
       <div className="dataset-summary">
         <p>{datasetMeta[kind].description}</p>
         <strong>
-          {busy ? "Loading…" : `${filtered.length.toLocaleString()} matches`}
+          {busy ? "Loading…" : datasetMeta[kind].remoteQuery && !searched
+            ? `Previewing 100 of ${datasetMeta[kind].count.toLocaleString()}`
+            : `${shownTotal.toLocaleString()} matches · showing ${visibleRows.length}`}
         </strong>
       </div>
       <div className="ionnet-table-wrap">
-        {error ? (
-          <p className="dataset-error">{error}</p>
-        ) : (
+        {error ? <p className="dataset-error">{error}</p> : (
           <table>
             <thead>
-              {kind === "experimental" ? (
-                <tr>
-                  <th>Composition</th>
-                  <th>Conductivity (S cm⁻¹)</th>
-                  <th>Structure</th>
-                  <th>Chemical family</th>
-                  <th>Source</th>
-                </tr>
-              ) : kind === "computational" ? (
-                <tr>
-                  <th>Composition</th>
-                  <th>Computational SIC target</th>
-                </tr>
-              ) : (
-                <tr>
-                  <th>MP ID</th>
-                  <th>Composition</th>
-                  <th>Energy above hull (eV)</th>
-                  <th>Band gap (eV)</th>
-                </tr>
-              )}
+              {kind === "experimental" ? <tr><th>Composition</th><th>Conductivity (S cm⁻¹)</th><th>Structure</th><th>Chemical family</th><th>Source</th></tr>
+                : kind === "computational" ? <tr><th>Composition</th><th>Computational SIC target</th></tr>
+                  : kind === "materials" ? <tr><th>MP ID</th><th>Composition</th><th>Energy above hull (eV)</th><th>Band gap (eV)</th></tr>
+                    : kind === "single" ? <tr><th>MP ID</th><th>Parent</th><th>Single-substitution candidate</th></tr>
+                      : <tr><th>Set</th><th>MP ID</th><th>Parent</th><th>Double-substitution candidate</th><th>pσ</th><th>log₁₀ σ</th><th>Uncertainty</th></tr>}
             </thead>
             <tbody>
-              {filtered.slice(0, 100).map((row, index) =>
-                kind === "experimental" ? (
-                  <tr key={`${(row as ExperimentalRow).id}-${index}`}>
-                    <td className="formula-cell">{(row as ExperimentalRow).formula}</td>
-                    <td>{formatScientific((row as ExperimentalRow).conductivity)}</td>
-                    <td>{(row as ExperimentalRow).structureFamily || "—"}</td>
-                    <td>{(row as ExperimentalRow).chemicalFamily}</td>
-                    <td>
-                      <a
-                        href={`https://doi.org/${(row as ExperimentalRow).source}`}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        {(row as ExperimentalRow).source}
-                      </a>
-                    </td>
-                  </tr>
-                ) : kind === "computational" ? (
-                  <tr key={`${(row as ComputationalRow).formula}-${index}`}>
-                    <td className="formula-cell">{(row as ComputationalRow).formula}</td>
-                    <td>{(row as ComputationalRow).sic.toFixed(4)}</td>
-                  </tr>
-                ) : (
-                  <tr key={(row as MaterialsRow).mpId}>
-                    <td>{(row as MaterialsRow).mpId}</td>
-                    <td className="formula-cell">{(row as MaterialsRow).formula}</td>
-                    <td>{(row as MaterialsRow).energyAboveHull.toFixed(4)}</td>
-                    <td>{(row as MaterialsRow).bandGap.toFixed(3)}</td>
-                  </tr>
-                ),
-              )}
+              {visibleRows.map((row, index) => {
+                if (kind === "experimental") {
+                  const item = row as ExperimentalRow;
+                  return <tr key={`${item.id}-${index}`}><td className="formula-cell">{item.formula}</td><td>{formatScientific(item.conductivity)}</td><td>{item.structureFamily || "—"}</td><td>{item.chemicalFamily}</td><td><a href={`https://doi.org/${item.source}`} target="_blank" rel="noreferrer">{item.source}</a></td></tr>;
+                }
+                if (kind === "computational") {
+                  const item = row as ComputationalRow;
+                  return <tr key={`${item.formula}-${index}`}><td className="formula-cell">{item.formula}</td><td>{Number(item.sic).toFixed(4)}</td></tr>;
+                }
+                if (kind === "materials") {
+                  const item = row as MaterialsRow;
+                  return <tr key={item.mpId}><td>{item.mpId}</td><td className="formula-cell">{item.formula}</td><td>{item.energyAboveHull.toFixed(4)}</td><td>{item.bandGap.toFixed(3)}</td></tr>;
+                }
+                if (kind === "single") {
+                  const item = row as SingleSubstitutionRow;
+                  return <tr key={`${item.mpId}-${item.candidate}-${index}`}><td>{item.mpId}</td><td className="formula-cell">{item.parent}</td><td className="formula-cell">{item.candidate}</td></tr>;
+                }
+                const item = row as DoubleSubstitutionRow;
+                return <tr key={`${item.series}-${item.mpId}-${item.candidate}-${index}`}><td>{item.series}</td><td>{item.mpId}</td><td className="formula-cell">{item.parent}</td><td className="formula-cell">{item.candidate}</td><td>{Number(item.pSigma).toFixed(3)}</td><td>{(-Number(item.pSigma)).toFixed(3)}</td><td>{Number(item.uncertainty).toFixed(3)}</td></tr>;
+              })}
             </tbody>
           </table>
         )}
       </div>
-      {filtered.length > 100 && (
-        <p className="dataset-limit">
-          Showing the first 100 matches. Refine the search to narrow the result set.
-        </p>
-      )}
+      <p className="dataset-limit">Only 100 rows are rendered at once. Searches run against the complete selected dataset.</p>
     </div>
   );
 }
 
-function IonNetPredictionExplorer({ onUse }: { onUse: () => void }) {
-  const [series, setSeries] = useState(1);
-  const [query, setQuery] = useState("");
-  const [maxPSigma, setMaxPSigma] = useState(4);
-  const [maxUncertainty, setMaxUncertainty] = useState(2);
-  const [rows, setRows] = useState<PredictionRow[]>([]);
+function IonNetModelPrediction({ onUse }: { onUse: () => void }) {
+  const [formula, setFormula] = useState("Li10GeP2S12");
+  const [result, setResult] = useState<IonNetPrediction>();
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState(
-    "Choose a published candidate set and run the ensemble screen.",
-  );
+  const [message, setMessage] = useState("Enter a composition using standard chemical-formula notation.");
 
-  async function runScreen() {
+  async function runPrediction() {
     setBusy(true);
-    setMessage("Loading the published IonNet ensemble predictions…");
+    setMessage("Generating 332 composition descriptors and running ten IonNet models…");
     onUse();
     try {
-      const data = await loadPredictionSeries(series);
-      setRows(data);
-      setMessage(
-        `Loaded ${data.length.toLocaleString()} model-scored substitutions from candidate set ${series}.`,
-      );
+      const prediction = await predictIonNet(formula);
+      setResult(prediction);
+      setMessage("Prediction completed locally with the published fine-tuned ensemble.");
     } catch (cause) {
-      setMessage(`Prediction data unavailable: ${String(cause)}`);
+      setResult(undefined);
+      setMessage(`Unable to predict: ${cause instanceof Error ? cause.message : String(cause)}`);
     } finally {
       setBusy(false);
     }
   }
 
-  const filtered = useMemo(() => {
-    const normalized = query.trim().toLowerCase();
-    return rows.filter(
-      (row) =>
-        row.pSigma <= maxPSigma &&
-        row.uncertainty <= maxUncertainty &&
-        (!normalized ||
-          `${row.mpId} ${row.parent} ${row.candidate}`
-            .toLowerCase()
-            .includes(normalized)),
-    );
-  }, [maxPSigma, maxUncertainty, query, rows]);
-
-  const best = filtered[0];
   return (
-    <div className="ionnet-prediction-grid">
+    <div className="ionnet-prediction-grid model-prediction-grid">
       <div className="control-card ionnet-control-card">
         <div className="card-heading">
-          <span className="eyebrow ionnet-eyebrow">ENSEMBLE SCREEN</span>
-          <h2>Rank substituted conductors</h2>
-          <p>
-            Query the complete published double-substitution predictions. Lower
-            pσ indicates higher predicted ionic conductivity.
-          </p>
+          <span className="eyebrow ionnet-eyebrow">LIVE IONNET ENSEMBLE</span>
+          <h2>Predict from a chemical formula</h2>
+          <p>IonNet uses Meredig, Magpie and MEGNet composition descriptors. Candidate-set membership is not required.</p>
         </div>
-        <div className="fields">
-          <label className="field">
-            <span>Candidate set</span>
-            <select value={series} onChange={(event) => setSeries(+event.target.value)}>
-              {[1, 2, 3, 4].map((value) => (
-                <option value={value} key={value}>
-                  Set {value}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>Formula or MP ID</span>
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="e.g. Li2BiF5 or mp-760419"
-            />
-          </label>
-          <label className="field">
-            <span>Maximum pσ · {maxPSigma.toFixed(1)}</span>
-            <input
-              type="range"
-              min="0"
-              max="4"
-              step="0.1"
-              value={maxPSigma}
-              onChange={(event) => setMaxPSigma(+event.target.value)}
-            />
-          </label>
-          <label className="field">
-            <span>Maximum uncertainty · {maxUncertainty.toFixed(1)}</span>
-            <input
-              type="range"
-              min="0.2"
-              max="2"
-              step="0.1"
-              value={maxUncertainty}
-              onChange={(event) => setMaxUncertainty(+event.target.value)}
-            />
-          </label>
-        </div>
-        <button className="primary ionnet-primary" onClick={runScreen} disabled={busy}>
-          {busy ? "Loading predictions…" : "Run predictive screen"}
-          <ChevronRight size={17} />
+        <label className="formula-input-label">
+          <span>Chemical formula</span>
+          <input value={formula} onChange={(event) => setFormula(event.target.value)} onKeyDown={(event) => event.key === "Enter" && void runPrediction()} placeholder="e.g. Li10GeP2S12" autoComplete="off" />
+        </label>
+        <button className="primary ionnet-primary" onClick={() => void runPrediction()} disabled={busy}>
+          {busy ? "Running IonNet…" : "Predict ionic conductivity"}<ChevronRight size={17} />
         </button>
         <p className="prediction-note">{message}</p>
+        <div className="target-definition">
+          <b>Output convention</b>
+          <span>Model-native pσ = −log₁₀(σ / S·cm⁻¹). This page reports log₁₀ σ by reversing the sign.</span>
+        </div>
       </div>
       <div className="ionnet-prediction-results">
-        <div className="prediction-spotlight">
-          <span className="eyebrow ionnet-eyebrow">TOP MATCH</span>
-          {best ? (
+        <div className="prediction-spotlight model-spotlight">
+          <span className="eyebrow ionnet-eyebrow">ROOM-TEMPERATURE PREDICTION</span>
+          {result ? (
             <>
-              <h3>{best.candidate}</h3>
-              <div className="prediction-values">
-                <div>
-                  <strong>{best.pSigma.toFixed(3)}</strong>
-                  <span>predicted pσ</span>
-                </div>
-                <div>
-                  <strong>± {best.uncertainty.toFixed(3)}</strong>
-                  <span>ensemble uncertainty</span>
-                </div>
+              <h3>{result.formula}</h3>
+              <div className="model-primary-result">
+                <strong>{result.logConductivity.toFixed(3)}</strong>
+                <span>log₁₀(σ / S·cm⁻¹)</span>
               </div>
-              <p>
-                Approx. σ = {Math.pow(10, -best.pSigma).toExponential(2)} S cm⁻¹ ·
-                parent {best.parent} · {best.mpId}
-              </p>
+              <div className="prediction-values model-values">
+                <div><strong>{result.conductivity.toExponential(2)}</strong><span>σ · S cm⁻¹</span></div>
+                <div><strong>± {result.uncertainty.toFixed(3)}</strong><span>ensemble SD · log₁₀ units</span></div>
+                <div><strong>{result.pSigma.toFixed(3)}</strong><span>model-native pσ</span></div>
+              </div>
+              <p>One-standard-deviation interval: {result.lowerLogConductivity.toFixed(3)} to {result.upperLogConductivity.toFixed(3)} log₁₀(S cm⁻¹).</p>
+              <div className="ensemble-strip" aria-label="Individual model predictions">
+                {result.ensemble.map((value, index) => <span key={index}>M{index + 1} {value.toFixed(2)}</span>)}
+              </div>
             </>
           ) : (
-            <div className="empty-prediction">
-              <Atom size={34} />
-              <p>Run the screen to reveal ranked candidates.</p>
-            </div>
+            <div className="empty-prediction"><Atom size={34} /><p>Submit a formula to run the ten-model ensemble.</p></div>
           )}
         </div>
-        {filtered.length > 0 && (
-          <div className="prediction-table ionnet-table-wrap">
-            <div className="dataset-summary">
-              <p>Ranked by predicted pσ, then uncertainty.</p>
-              <strong>{filtered.length.toLocaleString()} matches</strong>
-            </div>
-            <table>
-              <thead>
-                <tr>
-                  <th>Candidate</th>
-                  <th>Parent</th>
-                  <th>MP ID</th>
-                  <th>pσ</th>
-                  <th>Uncertainty</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.slice(0, 100).map((row, index) => (
-                  <tr key={`${row.mpId}-${row.candidate}-${index}`}>
-                    <td className="formula-cell">{row.candidate}</td>
-                    <td>{row.parent}</td>
-                    <td>{row.mpId}</td>
-                    <td>{row.pSigma.toFixed(3)}</td>
-                    <td>{row.uncertainty.toFixed(3)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
       </div>
     </div>
   );
 }
 
-export function IonNetPlatform({
-  view,
-  onNavigate,
-  onSearchUse,
-  onPredictionUse,
-}: {
+export function IonNetPlatform({ view, onNavigate, onSearchUse, onPredictionUse }: {
   view: IonNetView;
   onNavigate: (view: IonNetView) => void;
   onSearchUse: () => void;
@@ -571,25 +449,13 @@ export function IonNetPlatform({
   return (
     <div className="page ionnet-page">
       <div className="section-title">
-        <span className="eyebrow ionnet-eyebrow">
-          {view === "data" ? "IONNET DATA" : "IONNET PREDICTIONS"}
-        </span>
-        <h1>
-          {view === "data"
-            ? "Search solid-electrolyte evidence."
-            : "Screen the substitution space."}
-        </h1>
-        <p>
-          {view === "data"
-            ? "Browse every composition released with IonNet across its computational, experimental and Materials Project datasets."
-            : "Explore model outputs generated by the published ten-model transfer-learning ensemble, including candidate-level uncertainty."}
-        </p>
+        <span className="eyebrow ionnet-eyebrow">{view === "data" ? "IONNET DATA" : "IONNET MODEL"}</span>
+        <h1>{view === "data" ? "Search solid-electrolyte evidence." : "Predict ionic conductivity."}</h1>
+        <p>{view === "data"
+          ? "Browse the training, screening, single-substitution and double-substitution data released with IonNet."
+          : "Enter any supported chemical composition to run the published transfer-learning ensemble and quantify model disagreement."}</p>
       </div>
-      {view === "data" ? (
-        <IonNetDataExplorer onUse={onSearchUse} />
-      ) : (
-        <IonNetPredictionExplorer onUse={onPredictionUse} />
-      )}
+      {view === "data" ? <IonNetDataExplorer onUse={onSearchUse} /> : <IonNetModelPrediction onUse={onPredictionUse} />}
     </div>
   );
 }
