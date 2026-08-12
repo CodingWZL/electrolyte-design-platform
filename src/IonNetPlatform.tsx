@@ -296,9 +296,15 @@ function IonNetDataExplorer({ onUse }: { onUse: () => void }) {
   }
 
   function chooseKind(next: DatasetKind) {
-    setKind(next);
+    if (next === kind) return;
+    setRows([]);
+    setBusy(true);
+    setError("");
+    setSearched(false);
+    setTotal(datasetMeta[next].count);
     setQuery("");
     setFamily("");
+    setKind(next);
     onUse();
   }
 
