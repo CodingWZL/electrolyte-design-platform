@@ -29,6 +29,8 @@ import {
 import { AdvancedStudio } from "./studio/AdvancedStudio";
 import { MolecularStudio } from "./studio/MolecularStudio";
 import type { StudioToolId } from "./studio/types";
+import { IonNetPlatform } from "./IonNetPlatform";
+import { PortalHome, type PlatformDestination } from "./PortalHome";
 
 type Catalog = {
   salts: Record<string, number[]>;
@@ -819,7 +821,7 @@ function GlobalReach({
 
 function App() {
   const [catalog, setCatalog] = useState<Catalog>();
-  const [page, setPage] = useState("home");
+  const [page, setPage] = useState("portal");
   const [analytics, setAnalytics] = useState<AnalyticsSummary>();
   const [analyticsStatus, setAnalyticsStatus] = useState<
     "loading" | "live" | "unavailable"
@@ -868,29 +870,65 @@ function App() {
       .catch(() => setAnalyticsStatus("unavailable"));
   };
   const trackStudioUse = (type: StudioToolId) => trackUsage(type);
-  const nav = useMemo(
-    () => [
-      ["home", "Overview"],
-      ["search", "Search"],
-      ["predict", "Prediction"],
-      ["molecules", "Molecules"],
-      ["advanced", "Advanced"],
+  const nav = useMemo(() => {
+    if (page.startsWith("ionnet")) {
+      return [
+        ["portal", "All platforms"],
+        ["ionnet-home", "Overview"],
+        ["ionnet-data", "Data Explorer"],
+        ["ionnet-predict", "Prediction"],
+        ["reach", "Global Reach"],
+      ];
+    }
+    if (page.startsWith("scan")) {
+      return [
+        ["portal", "All platforms"],
+        ["scan-home", "Overview"],
+        ["scan-search", "Search"],
+        ["scan-predict", "Prediction"],
+        ["scan-molecules", "Molecules"],
+        ["scan-advanced", "Advanced"],
+        ["reach", "Global Reach"],
+      ];
+    }
+    return [
+      ["portal", "Home"],
+      ["publications", "Publications"],
+      ["platforms", "Platforms"],
       ["reach", "Global Reach"],
-    ],
-    [],
-  );
+    ];
+  }, [page]);
+  const navigate = (destination: string) => {
+    if (destination === "publications" || destination === "platforms") {
+      setPage("portal");
+      window.requestAnimationFrame(() =>
+        document
+          .getElementById(destination)
+          ?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      );
+      return;
+    }
+    setPage(destination);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
   if (!catalog) return <div className="loading">Loading SCAN…</div>;
+  const ionNetView = page.startsWith("ionnet-")
+    ? (page.replace("ionnet-", "") as "home" | "data" | "predict")
+    : undefined;
+  const githubUrl = page.startsWith("ionnet")
+    ? "https://github.com/CodingWZL/IonNet"
+    : "https://github.com/CodingWZL/SCAN";
   return (
     <>
       <header>
-        <button className="brand" onClick={() => setPage("home")}>
+        <button className="brand" onClick={() => navigate("portal")}>
           <span>SC</span> SCAN
         </button>
         <nav>
           {nav.map(([id, label]) => (
             <button
               className={page === id ? "active" : ""}
-              onClick={() => setPage(id)}
+              onClick={() => navigate(id)}
               key={id}
             >
               {label}
@@ -899,14 +937,21 @@ function App() {
         </nav>
         <a
           className="github"
-          href="https://github.com/CodingWZL/SCAN"
+          href={githubUrl}
           target="_blank"
         >
           <Github size={18} /> GitHub
         </a>
       </header>
       <main>
-        {page === "home" && (
+        {page === "portal" && (
+          <PortalHome
+            onOpenPlatform={(destination: PlatformDestination) =>
+              navigate(destination)
+            }
+          />
+        )}
+        {page === "scan-home" && (
           <>
             <section className="hero">
               <div>
@@ -927,13 +972,13 @@ function App() {
                 <div className="hero-actions">
                   <button
                     className="primary"
-                    onClick={() => setPage("predict")}
+                    onClick={() => navigate("scan-predict")}
                   >
                     Start predicting <ChevronRight size={17} />
                   </button>
                   <button
                     className="secondary"
-                    onClick={() => setPage("search")}
+                    onClick={() => navigate("scan-search")}
                   >
                     Explore the atlas
                   </button>
@@ -1034,7 +1079,7 @@ function App() {
             </footer>
           </>
         )}
-        {page === "search" && (
+        {page === "scan-search" && (
           <div className="page">
             <div className="section-title">
               <span className="eyebrow">DATABASE QUERY</span>
@@ -1051,7 +1096,7 @@ function App() {
             />
           </div>
         )}
-        {page === "predict" && (
+        {page === "scan-predict" && (
           <div className="page">
             <div className="section-title">
               <span className="eyebrow">MODEL PREDICTION</span>
@@ -1065,7 +1110,7 @@ function App() {
             />
           </div>
         )}
-        {page === "molecules" && (
+        {page === "scan-molecules" && (
           <div className="page">
             <MolecularStudio
               library={<ScanMoleculeLibrary catalog={catalog} />}
@@ -1079,10 +1124,18 @@ function App() {
             <GlobalReach summary={analytics} status={analyticsStatus} />
           </div>
         )}
-        {page === "advanced" && (
+        {page === "scan-advanced" && (
           <div className="page">
             <AdvancedStudio usage={analytics?.featureUses} onUse={trackStudioUse} />
           </div>
+        )}
+        {ionNetView && (
+          <IonNetPlatform
+            view={ionNetView}
+            onNavigate={(view) => navigate(`ionnet-${view}`)}
+            onSearchUse={() => trackUsage("search")}
+            onPredictionUse={() => trackUsage("prediction")}
+          />
         )}
       </main>
     </>
