@@ -40,7 +40,13 @@ type MaterialsRow = {
   energyAboveHull: number;
   bandGap: number;
 };
-type SingleSubstitutionRow = { mpId: string; parent: string; candidate: string };
+type SingleSubstitutionRow = {
+  mpId: string;
+  parent: string;
+  candidate: string;
+  pSigma: number;
+  uncertainty: number;
+};
 type DoubleSubstitutionRow = SingleSubstitutionRow & {
   series: number;
   pSigma: number;
@@ -65,30 +71,36 @@ const datasetMeta = {
     label: "Computational",
     count: 8750,
     file: "computational-preview.json",
-    parquet: "computational.parquet",
+    parquet: ["computational.parquet"],
     remoteQuery: true,
-    description: "Published computational training compositions and SIC targets.",
+    description: "Published computational training compositions and superionic-conductor probability scores.",
   },
   materials: {
     label: "Materials Project",
     count: 4582,
-    file: "materials-project.json",
-    remoteQuery: false,
+    file: "materials-project-preview.json",
+    parquet: ["materials-project.parquet"],
+    remoteQuery: true,
     description: "Screened Li-containing compounds with stability and band-gap data.",
   },
   single: {
     label: "Single substitution",
     count: 624460,
     file: "single-substitution-preview.json",
-    parquet: "single-substitution.parquet",
+    parquet: ["single-substitution.parquet"],
     remoteQuery: true,
-    description: "All released single-element substitution candidates.",
+    description: "All released model-scored single-element substitutions.",
   },
   double: {
     label: "Double substitution",
-    count: 207980,
+    count: 4316850,
     file: "double-substitution-preview.json",
-    parquet: "double-substitution.parquet",
+    parquet: [
+      "double-substitution-1.parquet",
+      "double-substitution-2.parquet",
+      "double-substitution-3.parquet",
+      "double-substitution-4.parquet",
+    ],
     remoteQuery: true,
     description: "Model-scored double substitutions from the four published sets.",
   },
@@ -126,17 +138,21 @@ async function queryLargeDataset(kind: DatasetKind, query: string) {
   const meta = datasetMeta[kind];
   if (!("parquet" in meta)) throw new Error("This dataset is searched locally.");
   const connection = await getIonNetConnection();
-  const url = `${location.origin}${base}data/ionnet/${meta.parquet}`;
+  const urls = meta.parquet.map(
+    (file) => `${location.origin}${base}data/ionnet/${file}`,
+  );
+  const source = urls.length === 1
+    ? `'${urls[0]}'`
+    : `[${urls.map((url) => `'${url}'`).join(",")}]`;
   const escaped = query.trim().toLowerCase().replace(/'/g, "''");
   const searchable =
-    kind === "computational"
-      ? "formula"
-      : kind === "single"
-        ? "concat_ws(' ', mpId, parent, candidate)"
-        : "concat_ws(' ', CAST(series AS VARCHAR), mpId, parent, candidate)";
+    kind === "computational" ? "formula"
+      : kind === "materials" ? "concat_ws(' ', mpId, formula)"
+        : kind === "single" ? "concat_ws(' ', mpId, parent, candidate)"
+          : "concat_ws(' ', CAST(series AS VARCHAR), mpId, parent, candidate)";
   const where = escaped ? `WHERE lower(${searchable}) LIKE '%${escaped}%'` : "";
   const table = await connection.query(
-    `SELECT *, COUNT(*) OVER() AS total_matches FROM read_parquet('${url}') ${where} LIMIT 100`,
+    `SELECT *, COUNT(*) OVER() AS total_matches FROM read_parquet(${source}) ${where} LIMIT 100`,
   );
   const values = table.toArray().map((row: any) => row.toJSON());
   return {
@@ -193,7 +209,7 @@ function IonNetOverview({ onNavigate }: { onNavigate: (view: IonNetView) => void
         <div><b>398</b><span>experimental conductors</span></div>
         <div><b>4,582</b><span>Materials Project compounds</span></div>
         <div><b>624,460</b><span>single substitutions</span></div>
-        <div><b>207,980</b><span>double substitutions</span></div>
+        <div><b>4,316,850</b><span>double substitutions</span></div>
       </section>
       <section className="story ionnet-story">
         <div>
@@ -327,6 +343,15 @@ function IonNetDataExplorer({ onUse }: { onUse: () => void }) {
             : `${shownTotal.toLocaleString()} matches · showing ${visibleRows.length}`}
         </strong>
       </div>
+      {kind === "computational" && (
+        <div className="dataset-definition-note">
+          <b>About the SIC score</b>
+          <span>
+            This value is the predicted probability that a composition is a
+            superionic conductor. Scores closer to 1 indicate higher model confidence.
+          </span>
+        </div>
+      )}
       <div className="ionnet-table-wrap">
         {error ? <p className="dataset-error">{error}</p> : (
           <table>
@@ -334,7 +359,7 @@ function IonNetDataExplorer({ onUse }: { onUse: () => void }) {
               {kind === "experimental" ? <tr><th>Composition</th><th>Conductivity (S cm⁻¹)</th><th>Structure</th><th>Chemical family</th><th>Source</th></tr>
                 : kind === "computational" ? <tr><th>Composition</th><th>Computational SIC target</th></tr>
                   : kind === "materials" ? <tr><th>MP ID</th><th>Composition</th><th>Energy above hull (eV)</th><th>Band gap (eV)</th></tr>
-                    : kind === "single" ? <tr><th>MP ID</th><th>Parent</th><th>Single-substitution candidate</th></tr>
+                    : kind === "single" ? <tr><th>MP ID</th><th>Parent</th><th>Single-substitution candidate</th><th>pσ</th><th>log₁₀ σ</th><th>Uncertainty</th></tr>
                       : <tr><th>Set</th><th>MP ID</th><th>Parent</th><th>Double-substitution candidate</th><th>pσ</th><th>log₁₀ σ</th><th>Uncertainty</th></tr>}
             </thead>
             <tbody>
@@ -353,7 +378,7 @@ function IonNetDataExplorer({ onUse }: { onUse: () => void }) {
                 }
                 if (kind === "single") {
                   const item = row as SingleSubstitutionRow;
-                  return <tr key={`${item.mpId}-${item.candidate}-${index}`}><td>{item.mpId}</td><td className="formula-cell">{item.parent}</td><td className="formula-cell">{item.candidate}</td></tr>;
+                  return <tr key={`${item.mpId}-${item.candidate}-${index}`}><td>{item.mpId}</td><td className="formula-cell">{item.parent}</td><td className="formula-cell">{item.candidate}</td><td>{Number(item.pSigma).toFixed(3)}</td><td>{(-Number(item.pSigma)).toFixed(3)}</td><td>{Number(item.uncertainty).toFixed(3)}</td></tr>;
                 }
                 const item = row as DoubleSubstitutionRow;
                 return <tr key={`${item.series}-${item.mpId}-${item.candidate}-${index}`}><td>{item.series}</td><td>{item.mpId}</td><td className="formula-cell">{item.parent}</td><td className="formula-cell">{item.candidate}</td><td>{Number(item.pSigma).toFixed(3)}</td><td>{(-Number(item.pSigma)).toFixed(3)}</td><td>{Number(item.uncertainty).toFixed(3)}</td></tr>;
@@ -362,7 +387,7 @@ function IonNetDataExplorer({ onUse }: { onUse: () => void }) {
           </table>
         )}
       </div>
-      <p className="dataset-limit">Only 100 rows are rendered at once. Searches run against the complete selected dataset.</p>
+      <p className="dataset-limit">The initial 100-row preview is a fixed random sample. Searches run against the complete selected dataset and still render at most 100 results.</p>
     </div>
   );
 }

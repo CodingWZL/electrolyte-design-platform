@@ -11,7 +11,9 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "IonNet-source"
+EXTRACTED = SOURCE / ".extracted-results"
 OUTPUT = ROOT / "deploy" / "public" / "data" / "ionnet"
+RANDOM_SEED = 2026
 
 
 def read_csv(path: Path) -> list[dict[str, str]]:
@@ -25,11 +27,41 @@ def write_json(name: str, records: list[dict[str, object]]) -> None:
         json.dump(records, handle, ensure_ascii=False, separators=(",", ":"))
 
 
+def fixed_preview(frame: pd.DataFrame) -> list[dict[str, object]]:
+    return frame.sample(n=min(100, len(frame)), random_state=RANDOM_SEED).to_dict(
+        orient="records"
+    )
+
+
+def read_prediction_pairs(path: Path, series: int | None = None) -> pd.DataFrame:
+    """Convert the repository's alternating formula/result rows to one record each."""
+    raw = pd.read_csv(path, dtype=str, low_memory=False)
+    formula_rows = raw.iloc[1::2].reset_index(drop=True)
+    result_rows = raw.iloc[2::2].reset_index(drop=True)
+    if len(formula_rows) != len(result_rows):
+        raise ValueError(f"Unpaired prediction rows in {path.name}")
+    frame = pd.DataFrame(
+        {
+            "mpId": formula_rows.iloc[:, 0],
+            "parent": formula_rows.iloc[:, 1],
+            "candidate": formula_rows.iloc[:, 2],
+            "pSigma": pd.to_numeric(result_rows.iloc[:, 1], errors="raise"),
+            "uncertainty": pd.to_numeric(result_rows.iloc[:, 2], errors="raise"),
+        }
+    )
+    if series is not None:
+        frame.insert(0, "series", series)
+    return frame
+
+
 def build() -> None:
-    computational = [
-        {"formula": row["formula"], "sic": float(row["SIC"])}
-        for row in read_csv(SOURCE / "data" / "Li-IonML-Computations.csv")
-    ]
+    OUTPUT.mkdir(parents=True, exist_ok=True)
+    computational = pd.DataFrame(
+        [
+            {"formula": row["formula"], "sic": float(row["SIC"])}
+            for row in read_csv(SOURCE / "data" / "Li-IonML-Computations.csv")
+        ]
+    )
     experimental = [
         {
             "id": row["ID"],
@@ -41,75 +73,57 @@ def build() -> None:
             "chemicalFamily": row["ChemicalFamily"],
             "source": row["source"],
         }
-        for row in read_csv(
-            SOURCE / "data" / "LiIonDatabase-Experiments-300K.csv"
-        )
+        for row in read_csv(SOURCE / "data" / "LiIonDatabase-Experiments-300K.csv")
     ]
-    materials = [
-        {
-            "mpId": row["MP ID"],
-            "formula": row["Formula"],
-            "energyAboveHull": float(row["Energy Above Hull (eV)"]),
-            "bandGap": float(row["Band Gap (eV)"]),
-        }
-        for row in read_csv(SOURCE / "data" / "Li-MP-final.csv")
-    ]
+    materials = pd.DataFrame(
+        [
+            {
+                "mpId": row["MP ID"],
+                "formula": row["Formula"],
+                "energyAboveHull": float(row["Energy Above Hull (eV)"]),
+                "bandGap": float(row["Band Gap (eV)"]),
+            }
+            for row in read_csv(SOURCE / "data" / "Li-MP-final.csv")
+        ]
+    )
 
-    write_json("computational-preview.json", computational[:100])
+    write_json("computational-preview.json", fixed_preview(computational))
     write_json("experimental.json", experimental)
-    write_json("materials-project.json", materials)
-    pd.DataFrame(computational).to_parquet(
+    write_json("materials-project-preview.json", fixed_preview(materials))
+    computational.to_parquet(
         OUTPUT / "computational.parquet", index=False, compression="zstd"
     )
+    materials.to_parquet(
+        OUTPUT / "materials-project.parquet", index=False, compression="zstd"
+    )
 
-    single_frame = pd.read_csv(
-        SOURCE / "predictions" / "Li-single-substitute.csv"
-    ).rename(
-        columns={"MP-id": "mpId", "Old_formula": "parent", "New_formula": "candidate"}
-    )
-    write_json(
-        "single-substitution-preview.json",
-        single_frame.head(100).to_dict(orient="records"),
-    )
+    single_frame = read_prediction_pairs(EXTRACTED / "single-results.csv")
+    write_json("single-substitution-preview.json", fixed_preview(single_frame))
     single_frame.to_parquet(
         OUTPUT / "single-substitution.parquet", index=False, compression="zstd"
     )
 
     prediction_counts: dict[str, int] = {}
-    double_predictions: list[dict[str, object]] = []
+    preview_pool: list[pd.DataFrame] = []
     for series in range(1, 5):
-        path = SOURCE / "predictions" / f"{series}-double-candidate.csv"
-        with path.open(encoding="utf-8-sig", newline="") as handle:
-            rows = list(csv.reader(handle))
-        predictions: list[dict[str, object]] = []
-        for index in range(2, len(rows) - 1, 2):
-            formula_row = rows[index]
-            value_row = rows[index + 1]
-            if len(formula_row) < 3 or len(value_row) < 3:
-                continue
-            try:
-                predictions.append(
-                    {
-                        "series": series,
-                        "mpId": formula_row[0],
-                        "parent": formula_row[1],
-                        "candidate": formula_row[2],
-                        "pSigma": float(value_row[1]),
-                        "uncertainty": float(value_row[2]),
-                    }
-                )
-            except ValueError:
-                continue
-        predictions.sort(key=lambda item: (item["pSigma"], item["uncertainty"]))
-        double_predictions.extend(predictions)
-        prediction_counts[str(series)] = len(predictions)
+        frame = read_prediction_pairs(
+            EXTRACTED / f"{series}-double-results.csv", series=series
+        )
+        frame.to_parquet(
+            OUTPUT / f"double-substitution-{series}.parquet",
+            index=False,
+            compression="zstd",
+        )
+        preview_pool.append(frame.sample(n=100, random_state=RANDOM_SEED + series))
+        prediction_counts[str(series)] = len(frame)
 
-    double_predictions.sort(key=lambda item: (item["pSigma"], item["uncertainty"]))
-    write_json("double-substitution-preview.json", double_predictions[:100])
-    pd.DataFrame(double_predictions).to_parquet(
-        OUTPUT / "double-substitution.parquet", index=False, compression="zstd"
+    double_preview = pd.concat(preview_pool, ignore_index=True).sample(
+        n=100, random_state=RANDOM_SEED
     )
-
+    write_json(
+        "double-substitution-preview.json", double_preview.to_dict(orient="records")
+    )
+    double_count = sum(prediction_counts.values())
     write_json(
         "manifest.json",
         [
@@ -118,8 +132,9 @@ def build() -> None:
                 "experimental": len(experimental),
                 "materialsProject": len(materials),
                 "predictionSeries": prediction_counts,
-                "predictions": sum(prediction_counts.values()),
+                "doubleSubstitutions": double_count,
                 "singleSubstitutions": len(single_frame),
+                "totalSubstitutions": double_count + len(single_frame),
             }
         ],
     )

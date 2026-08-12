@@ -49,7 +49,7 @@ const platforms = [
     type: "Solid-state fast-ion conductors",
     description:
       "Search experimental, computational, single- and double-substitution data, then predict ionic conductivity directly from a formula.",
-    metrics: ["8,750 computed", "624,460 single", "207,980 double"],
+    metrics: ["8,750 computed", "624,460 single", "4,316,850 double"],
     icon: Atom,
     tone: "solid",
   },
