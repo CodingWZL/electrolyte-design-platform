@@ -85,11 +85,18 @@ async function loadPredictionSeries(series: number) {
   const response = await fetch(
     `${base}data/ionnet/predictions-${series}.json.gz`,
   );
-  if (!response.ok || !response.body) {
+  if (!response.ok) {
     throw new Error(`Prediction request failed (${response.status})`);
   }
-  const stream = response.body.pipeThrough(new DecompressionStream("gzip"));
-  const rows = (await new Response(stream).json()) as PredictionRow[];
+  const buffer = await response.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  const isGzip = bytes[0] === 0x1f && bytes[1] === 0x8b;
+  const text = isGzip
+    ? await new Response(
+        new Response(buffer).body!.pipeThrough(new DecompressionStream("gzip")),
+      ).text()
+    : new TextDecoder().decode(buffer);
+  const rows = JSON.parse(text) as PredictionRow[];
   predictionCache.set(series, rows);
   return rows;
 }
