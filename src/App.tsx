@@ -13,10 +13,13 @@ import {
   BarChart3,
   BookOpen,
   ChevronRight,
+  Copy,
   Database,
+  Download,
   FlaskConical,
   Github,
   Layers3,
+  RotateCcw,
   Search,
   Sparkles,
 } from "lucide-react";
@@ -31,6 +34,7 @@ import { MolecularStudio } from "./studio/MolecularStudio";
 import type { StudioToolId } from "./studio/types";
 import { IonNetPlatform } from "./IonNetPlatform";
 import { PortalHome, type PlatformDestination } from "./PortalHome";
+import { copyText, downloadCsv } from "./research-utils";
 
 type Catalog = {
   salts: Record<string, number[]>;
@@ -97,6 +101,26 @@ const searchDefaults: SearchInputs = {
   solventUnit: "w",
   temperature: "300",
 };
+const pageDestinations = new Set([
+  "portal",
+  "publications",
+  "platforms",
+  "scan-home",
+  "scan-search",
+  "scan-predict",
+  "scan-molecules",
+  "scan-advanced",
+  "tools",
+  "ionnet-home",
+  "ionnet-data",
+  "ionnet-predict",
+  "reach",
+]);
+
+function hashDestination() {
+  const destination = window.location.hash.replace(/^#/, "");
+  return pageDestinations.has(destination) ? destination : "portal";
+}
 const chinaRegionNames: Record<string, string> = {
   HK: "Hong Kong, China",
   TW: "Taiwan, China",
@@ -264,6 +288,20 @@ function PredictionPanel({
       setBusy(false);
     }
   }
+  async function copyPrediction() {
+    if (prediction === undefined) return;
+    await copyText(
+      [
+        "SCAN conductivity prediction",
+        `Salt: ${x.salt}`,
+        `Solvents: ${x.solvent1} ${x.ratio1} / ${x.solvent2} ${ratio2} (${x.solventUnit})`,
+        `Concentration: ${x.concentration} ${x.concentrationUnit}`,
+        `Temperature: ${x.temperature} K`,
+        `Conductivity: ${prediction.toFixed(3)} mS cm^-1`,
+      ].join("\n"),
+    );
+    setMessage("Prediction copied with its formulation and conditions.");
+  }
   return (
     <>
       <div className="tool-grid">
@@ -369,7 +407,21 @@ function PredictionPanel({
           <p className="status">
             {message || "Set the formulation, then run the model."}
           </p>
+          {prediction !== undefined && (
+            <button className="result-action" onClick={() => void copyPrediction()}>
+              <Copy size={15} /> Copy result
+            </button>
+          )}
         </div>
+      </div>
+      <div className="scientific-note">
+        <b>Model scope</b>
+        <span>
+          The prediction applies to the selected two-solvent formulation within
+          SCAN&apos;s published chemical and temperature space. Treat it as a
+          screening estimate; water content, impurities and laboratory protocol
+          can materially change measured conductivity.
+        </span>
       </div>
       <UsageCounter label="Conductivity predictions" count={usageCount} />
     </>
@@ -462,6 +514,50 @@ function SearchPanel({
       setBusy(false);
     }
   }
+  function clearFilters() {
+    setX({
+      salt: "",
+      concentration: "",
+      concentrationUnit: "",
+      solvent1: "",
+      ratio1: "",
+      solvent2: "",
+      solventUnit: "",
+      temperature: "",
+    });
+    setRows([]);
+    setTotal(0);
+    setMessage("Filters cleared. Select any known component or condition.");
+  }
+  function exportResults() {
+    downloadCsv(
+      "scan-atlas-results.csv",
+      [
+        { key: "salt", label: "Lithium salt" },
+        { key: "solventA", label: "Solvent A" },
+        { key: "ratioA", label: "Ratio A" },
+        { key: "solventB", label: "Solvent B" },
+        { key: "ratioB", label: "Ratio B" },
+        { key: "ratioBasis", label: "Ratio basis" },
+        { key: "temperatureK", label: "Temperature (K)" },
+        { key: "concentration", label: "Concentration" },
+        { key: "concentrationUnit", label: "Concentration unit" },
+        { key: "conductivity", label: "Conductivity (mS cm^-1)" },
+      ],
+      rows.map((row) => ({
+        salt: row["Li-salt"],
+        solventA: row.solvent_1,
+        ratioA: row.ratio_1,
+        solventB: row.solvent_2,
+        ratioB: row.ratio_2,
+        ratioBasis: row["solvent-unit"],
+        temperatureK: row.T * 100,
+        concentration: row.concentration,
+        concentrationUnit: row["concentration-unit"],
+        conductivity: row.K,
+      })),
+    );
+  }
   return (
     <>
       <div className="search-layout">
@@ -552,9 +648,14 @@ function SearchPanel({
               </Select>
             </Field>
           </div>
-          <button className="primary" disabled={busy} onClick={search}>
-            {busy ? "Searching…" : "Search atlas"} <ChevronRight size={17} />
-          </button>
+          <div className="control-actions">
+            <button className="primary" disabled={busy} onClick={search}>
+              {busy ? "Searching…" : "Search atlas"} <ChevronRight size={17} />
+            </button>
+            <button className="secondary" disabled={busy} onClick={clearFilters}>
+              <RotateCcw size={15} /> Clear filters
+            </button>
+          </div>
         </div>
         <div className="results-panel">
           <div className="results-summary">
@@ -566,6 +667,11 @@ function SearchPanel({
             </div>
           </div>
           <p className="status">{message}</p>
+          {rows.length > 0 && (
+            <button className="result-action" onClick={exportResults}>
+              <Download size={15} /> Export shown results as CSV
+            </button>
+          )}
           <div className="table-wrap">
             <table>
               <thead>
@@ -725,10 +831,11 @@ function GlobalReach({
     <section className="analytics">
       <div className="section-title">
         <span className="eyebrow">GLOBAL REACH</span>
-        <h2>Where SCAN is being read.</h2>
+        <h2>Where AI for Battery is being used.</h2>
         <p>
-          Country-level totals are written atomically by a private analytics
-          service. The browser cannot set or edit any counter.
+          These are cumulative visits to the complete research portal,
+          including both SCAN and IonNet. Country-level totals are written
+          atomically by a private analytics service.
         </p>
       </div>
       <div className="metrics analytics-metrics">
@@ -747,6 +854,14 @@ function GlobalReach({
               : Math.max(0, visits - unattributed).toLocaleString()}
           </b>
           <span>attributed country visits</span>
+        </div>
+        <div>
+          <b>{summary ? summary.searchUses.toLocaleString() : "…"}</b>
+          <span>data searches across both platforms</span>
+        </div>
+        <div>
+          <b>{summary ? summary.predictionUses.toLocaleString() : "…"}</b>
+          <span>model predictions across both platforms</span>
         </div>
       </div>
       <div className="map-card">
@@ -811,7 +926,9 @@ function GlobalReach({
             </b>
             Country is assigned by the server. Raw IP addresses and city-level
             histories are not stored. Every country value is a cumulative
-            all-time total and remains cumulative across deployments.
+            all-time total and remains cumulative across deployments. A visit
+            is recorded once when the portal is opened; moving between SCAN and
+            IonNet does not artificially add another visit.
           </span>
         </div>
       </div>
@@ -821,8 +938,14 @@ function GlobalReach({
 
 function App() {
   const [catalog, setCatalog] = useState<Catalog>();
-  const [page, setPage] = useState("portal");
+  const [page, setPage] = useState(() => {
+    const destination = hashDestination();
+    return destination === "publications" || destination === "platforms"
+      ? "portal"
+      : destination;
+  });
   const [analytics, setAnalytics] = useState<AnalyticsSummary>();
+  const [linkCopied, setLinkCopied] = useState(false);
   const [analyticsStatus, setAnalyticsStatus] = useState<
     "loading" | "live" | "unavailable"
   >("loading");
@@ -859,6 +982,35 @@ function App() {
       active = false;
     };
   }, []);
+  useEffect(() => {
+    const syncFromHash = () => {
+      const destination = hashDestination();
+      if (destination === "publications" || destination === "platforms") {
+        setPage("portal");
+        window.requestAnimationFrame(() =>
+          document
+            .getElementById(destination)
+            ?.scrollIntoView({ behavior: "smooth", block: "start" }),
+        );
+        return;
+      }
+      setPage(destination);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    };
+    window.addEventListener("hashchange", syncFromHash);
+    return () => window.removeEventListener("hashchange", syncFromHash);
+  }, []);
+  useEffect(() => {
+    if (!catalog || page !== "portal") return;
+    const destination = hashDestination();
+    if (destination === "publications" || destination === "platforms") {
+      window.requestAnimationFrame(() =>
+        document
+          .getElementById(destination)
+          ?.scrollIntoView({ behavior: "auto", block: "start" }),
+      );
+    }
+  }, [catalog, page]);
   const trackUsage = (type: AnalyticsEvent) => {
     recordAnalyticsEvent(type)
       .then((summary) => {
@@ -877,6 +1029,7 @@ function App() {
         ["ionnet-home", "Overview"],
         ["ionnet-data", "Data Explorer"],
         ["ionnet-predict", "Prediction"],
+        ["tools", "Research Tools"],
         ["reach", "Global Reach"],
       ];
     }
@@ -887,7 +1040,7 @@ function App() {
         ["scan-search", "Search"],
         ["scan-predict", "Prediction"],
         ["scan-molecules", "Molecules"],
-        ["scan-advanced", "Advanced"],
+        ["tools", "Research Tools"],
         ["reach", "Global Reach"],
       ];
     }
@@ -895,10 +1048,16 @@ function App() {
       ["portal", "Home"],
       ["publications", "Publications"],
       ["platforms", "Platforms"],
+      ["tools", "Research Tools"],
       ["reach", "Global Reach"],
     ];
   }, [page]);
   const navigate = (destination: string) => {
+    const nextHash = destination === "portal" ? "" : `#${destination}`;
+    if (window.location.hash !== nextHash) {
+      window.location.hash = nextHash;
+      return;
+    }
     if (destination === "publications" || destination === "platforms") {
       setPage("portal");
       window.requestAnimationFrame(() =>
@@ -918,6 +1077,11 @@ function App() {
   const githubUrl = page.startsWith("ionnet")
     ? "https://github.com/CodingWZL/IonNet"
     : "https://github.com/CodingWZL/SCAN";
+  const copyPageLink = async () => {
+    await copyText(window.location.href);
+    setLinkCopied(true);
+    window.setTimeout(() => setLinkCopied(false), 1800);
+  };
   return (
     <>
       <header>
@@ -935,6 +1099,9 @@ function App() {
             </button>
           ))}
         </nav>
+        <button className="header-share" onClick={() => void copyPageLink()} aria-label="Copy a link to this research tool">
+          <Copy size={16} /> {linkCopied ? "Copied" : "Copy link"}
+        </button>
         <a
           className="github"
           href={githubUrl}
@@ -1124,7 +1291,7 @@ function App() {
             <GlobalReach summary={analytics} status={analyticsStatus} />
           </div>
         )}
-        {page === "scan-advanced" && (
+        {(page === "tools" || page === "scan-advanced") && (
           <div className="page">
             <AdvancedStudio usage={analytics?.featureUses} onUse={trackStudioUse} />
           </div>
