@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
-import { Activity, BatteryCharging, LineChart, Waves } from "lucide-react";
-import { FARADAY, GAS_CONSTANT, linearRegression, parseDelimited } from "./math";
+import { Activity, BatteryCharging, Download, Gauge, LineChart, Waves } from "lucide-react";
+import { downloadText, FARADAY, GAS_CONSTANT, linearRegression, parseDelimited, toCsv } from "./math";
 import type { FeatureUses, TrackStudioUse } from "./types";
 import { UsageBadge } from "./UsageBadge";
 
@@ -106,6 +106,43 @@ function EisWorkbench({ usage, onUse }: { usage?: FeatureUses; onUse: TrackStudi
   </article>;
 }
 
+function PelletConductivityCalculator({ usage, onUse }: { usage?: FeatureUses; onUse: TrackStudioUse }) {
+  const [values, setValues] = useState({ resistance: 1200, resistanceUncertainty: 50, thickness: 1, thicknessUncertainty: 0.02, diameter: 10, diameterUncertainty: 0.05 });
+  const [result, setResult] = useState<{ area: number; cellConstant: number; conductivity: number; resistivity: number; relativeUncertainty: number; absoluteUncertainty: number }>();
+  const calculate = () => {
+    const { resistance, resistanceUncertainty, thickness, thicknessUncertainty, diameter, diameterUncertainty } = values;
+    if (![resistance, thickness, diameter].every((value) => value > 0) || [resistanceUncertainty, thicknessUncertainty, diameterUncertainty].some((value) => value < 0)) return;
+    const lengthCm = thickness / 10;
+    const diameterCm = diameter / 10;
+    const area = Math.PI * (diameterCm / 2) ** 2;
+    const cellConstant = lengthCm / area;
+    const conductivity = cellConstant / resistance;
+    const relativeUncertainty = Math.sqrt((resistanceUncertainty / resistance) ** 2 + (thicknessUncertainty / thickness) ** 2 + (2 * diameterUncertainty / diameter) ** 2);
+    setResult({ area, cellConstant, conductivity, resistivity: 1 / conductivity, relativeUncertainty, absoluteUncertainty: conductivity * relativeUncertainty });
+    onUse("conductivity_calculate");
+  };
+  const exportResult = () => {
+    if (!result) return;
+    downloadText("pellet-conductivity-calculation.csv", toCsv([
+      ["resistance_ohm", "resistance_uncertainty_ohm", "thickness_mm", "thickness_uncertainty_mm", "diameter_mm", "diameter_uncertainty_mm", "area_cm2", "cell_constant_cm-1", "conductivity_S_cm-1", "conductivity_uncertainty_S_cm-1", "conductivity_mS_cm-1", "relative_uncertainty_percent", "resistivity_ohm_cm"],
+      [values.resistance, values.resistanceUncertainty, values.thickness, values.thicknessUncertainty, values.diameter, values.diameterUncertainty, result.area, result.cellConstant, result.conductivity, result.absoluteUncertainty, result.conductivity * 1000, result.relativeUncertainty * 100, result.resistivity],
+    ]), "text/csv");
+  };
+  return <article className="tool-card">
+    <div className="tool-heading"><div><span className="tool-kicker"><Gauge size={15} /> Solid electrolyte</span><h3>Pellet conductivity & uncertainty</h3><p>Convert bulk resistance and circular-pellet geometry into ionic conductivity, resistivity and propagated measurement uncertainty.</p></div><UsageBadge count={usage?.conductivity_calculate} /></div>
+    <div className="input-grid">
+      {([
+        ["resistance", "Resistance, Ω"], ["resistanceUncertainty", "Resistance uncertainty, Ω"],
+        ["thickness", "Pellet thickness, mm"], ["thicknessUncertainty", "Thickness uncertainty, mm"],
+        ["diameter", "Pellet diameter, mm"], ["diameterUncertainty", "Diameter uncertainty, mm"],
+      ] as const).map(([key, label]) => <label key={key}>{label}<input type="number" min="0" step="any" value={values[key]} onChange={(event) => setValues({ ...values, [key]: Number(event.target.value) })} /></label>)}
+    </div>
+    <div className="button-row"><button className="primary-button" onClick={calculate}>Calculate conductivity</button>{result && <button className="secondary-button" onClick={exportResult}><Download size={15} /> Export calculation</button>}</div>
+    {result && <div className="result-grid"><span><small>Electrode area</small><strong>{result.area.toPrecision(5)} cm²</strong></span><span><small>Cell constant L/A</small><strong>{result.cellConstant.toPrecision(5)} cm⁻¹</strong></span><span><small>Conductivity</small><strong>{result.conductivity.toExponential(3)} S cm⁻¹</strong></span><span><small>Conductivity</small><strong>{(result.conductivity * 1000).toPrecision(4)} mS cm⁻¹</strong></span><span><small>Propagated uncertainty</small><strong>± {result.absoluteUncertainty.toExponential(2)} S cm⁻¹ ({(result.relativeUncertainty * 100).toFixed(2)}%)</strong></span><span><small>Resistivity</small><strong>{result.resistivity.toPrecision(5)} Ω·cm</strong></span></div>}
+    <p className="method-note">Uses σ = L/(RA) for a circular pellet and first-order independent uncertainty propagation. Contact resistance, blocking electrodes, porosity, constriction, circuit-selection and systematic errors are not included.</p>
+  </article>;
+}
+
 function TransportCalculator({ usage, onUse }: { usage?: FeatureUses; onUse: TrackStudioUse }) {
   const [temperature, setTemperature] = useState(298.15);
   const [concentration, setConcentration] = useState(1000);
@@ -163,5 +200,5 @@ function TemperatureFit({ usage, onUse }: { usage?: FeatureUses; onUse: TrackStu
 }
 
 export function CharacterizeTools({ usage, onUse }: { usage?: FeatureUses; onUse: TrackStudioUse }) {
-  return <div className="advanced-tools"><EisWorkbench usage={usage} onUse={onUse} /><TransportCalculator usage={usage} onUse={onUse} /><BruceVincent usage={usage} onUse={onUse} /><TemperatureFit usage={usage} onUse={onUse} /></div>;
+  return <div className="advanced-tools"><EisWorkbench usage={usage} onUse={onUse} /><PelletConductivityCalculator usage={usage} onUse={onUse} /><TransportCalculator usage={usage} onUse={onUse} /><BruceVincent usage={usage} onUse={onUse} /><TemperatureFit usage={usage} onUse={onUse} /></div>;
 }

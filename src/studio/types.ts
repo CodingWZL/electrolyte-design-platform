@@ -11,6 +11,8 @@ export const studioToolIds = [
   "box_build",
   "dataset_harmonize",
   "pareto_analyze",
+  "ml_benchmark",
+  "conductivity_calculate",
 ] as const;
 
 export type StudioToolId = (typeof studioToolIds)[number];
@@ -41,4 +43,3 @@ export type SolventInput = {
   density: number;
   fraction: number;
 };
-

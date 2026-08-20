@@ -57,9 +57,33 @@ export function parseDelimited(text: string) {
       : /\s+/;
   return lines.map((line) =>
     typeof delimiter === "string"
-      ? line.split(delimiter).map((cell) => cell.trim())
+      ? splitDelimitedLine(line, delimiter)
       : line.split(delimiter).map((cell) => cell.trim()),
   );
+}
+
+function splitDelimitedLine(line: string, delimiter: string) {
+  const cells: string[] = [];
+  let current = "";
+  let quoted = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index];
+    if (character === '"') {
+      if (quoted && line[index + 1] === '"') {
+        current += '"';
+        index += 1;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (character === delimiter && !quoted) {
+      cells.push(current.trim());
+      current = "";
+    } else {
+      current += character;
+    }
+  }
+  cells.push(current.trim());
+  return cells;
 }
 
 export function toCsv(rows: Array<Array<string | number>>) {
@@ -125,4 +149,3 @@ export function paretoFront(
     })
   );
 }
-

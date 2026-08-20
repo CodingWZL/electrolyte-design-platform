@@ -9,13 +9,14 @@ solid-electrolyte projects.
 - Run the trained dynamic-routing conductivity model locally in the browser with ONNX Runtime Web.
 - Browse IonNet's 8,750 computational samples, 398 experimental records, and 4,582 screened Materials Project compounds.
 - Search 624,460 model-scored single substitutions and 4,316,850 model-scored double substitutions through fixed random 100-row previews and on-demand Parquet queries.
-- Predict room-temperature ionic conductivity from a chemical formula with the ten published fine-tuned IonNet models, including log10 conductivity and ensemble uncertainty.
+- Predict room-temperature ionic conductivity from a chemical formula with the ten published fine-tuned IonNet models, including log10 conductivity and ensemble uncertainty; batch-screen and rank up to 30 formulas with the same ensemble.
 - Rank IonNet candidates by predicted conductivity, stability, band gap or model uncertainty; open Materials Project records directly; and export visible research tables as CSV.
 - Cross-check an IonNet prediction against exact-formula experimental records and report both S/cm and mS/cm with a physical one-standard-deviation interval.
 - Share direct links to every platform view and use the common Research Tools workspace from either SCAN or IonNet.
 - Interactively rotate and inspect the published salt and solvent structures with 3Dmol.js.
 - Convert arbitrary SMILES into validated 2D structures, canonical identifiers, MOL/SVG files, RDKit descriptors, and Morgan fingerprints.
-- Search a general electrolyte-component encyclopedia and use browser-native formulation, mixture DoE, EIS, transport, Bruce–Vincent, Arrhenius/VTF, simulation-box, dataset-quality, and Pareto-analysis utilities.
+- Train and compare baseline, ridge, distance-weighted kNN, and random-forest regression models entirely in the browser with leakage-safe cross-validation, out-of-fold exports, deterministic permutation importance, and new-sample prediction.
+- Search a general electrolyte-component encyclopedia and use browser-native formulation, mixture DoE, EIS, pellet conductivity with propagated geometry/resistance uncertainty, transport, Bruce–Vincent, Arrhenius/VTF, simulation-box, dataset-quality, and Pareto-analysis utilities.
 - Record whole-portal page views and successful tool uses through a private Cloudflare Durable Object. The Global Reach page combines SCAN and IonNet, counts one visit per portal opening, and keeps country values as cumulative all-time totals; the public site has no counter-setting endpoint or analytics secret.
 
 The scientific source, training code, and original data are maintained in [CodingWZL/SCAN](https://github.com/CodingWZL/SCAN).

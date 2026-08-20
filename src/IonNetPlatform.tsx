@@ -544,6 +544,69 @@ function IonNetDataExplorer({ onUse }: { onUse: () => void }) {
   );
 }
 
+type BatchRanking = "predicted" | "conservative" | "uncertainty";
+
+function IonNetBatchScreen({ onUse }: { onUse: () => void }) {
+  const [text, setText] = useState("Li10GeP2S12\nLi7La3Zr2O12\nLi6PS5Cl\nLi3YCl6\nLi3OCl\nLi1.3Al0.3Ti1.7(PO4)3");
+  const [results, setResults] = useState<IonNetPrediction[]>([]);
+  const [failures, setFailures] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [ranking, setRanking] = useState<BatchRanking>("conservative");
+
+  const ranked = useMemo(() => [...results].sort((a, b) => {
+    if (ranking === "uncertainty") return a.uncertainty - b.uncertainty;
+    if (ranking === "predicted") return b.logConductivity - a.logConductivity;
+    return b.lowerLogConductivity - a.lowerLogConductivity;
+  }), [ranking, results]);
+
+  async function screen() {
+    const formulas = Array.from(new Set(text.split(/[\n,;]+/).map((value) => value.trim()).filter(Boolean))).slice(0, 30);
+    if (!formulas.length) return;
+    setBusy(true); setProgress(0); setResults([]); setFailures([]); onUse();
+    const completed: IonNetPrediction[] = [];
+    const rejected: string[] = [];
+    for (const [index, formula] of formulas.entries()) {
+      try { completed.push(await predictIonNet(formula)); }
+      catch { rejected.push(formula); }
+      setProgress(index + 1);
+      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    }
+    setResults(completed); setFailures(rejected); setBusy(false);
+  }
+
+  function exportBatch() {
+    downloadCsv("ionnet-batch-screen.csv", [
+      { key: "rank", label: "Rank" },
+      { key: "formula", label: "Composition" },
+      { key: "logConductivity", label: "Predicted log10 conductivity (S cm^-1)" },
+      { key: "conductivity", label: "Predicted conductivity (S cm^-1)" },
+      { key: "conductivityMilli", label: "Predicted conductivity (mS cm^-1)" },
+      { key: "uncertainty", label: "Ensemble SD (log10 units)" },
+      { key: "lowerLog", label: "One-SD lower log10 bound" },
+      { key: "upperLog", label: "One-SD upper log10 bound" },
+      { key: "conservativeScore", label: "Conservative ranking score" },
+    ], ranked.map((item, index) => ({
+      rank: index + 1,
+      formula: item.formula,
+      logConductivity: item.logConductivity,
+      conductivity: item.conductivity,
+      conductivityMilli: item.conductivity * 1000,
+      uncertainty: item.uncertainty,
+      lowerLog: item.lowerLogConductivity,
+      upperLog: item.upperLogConductivity,
+      conservativeScore: item.lowerLogConductivity,
+    })));
+  }
+
+  return <section className="batch-screen">
+    <div className="batch-screen-heading"><div><span className="eyebrow ionnet-eyebrow">BATCH CANDIDATE TRIAGE</span><h2>Rank a list of solid-electrolyte formulas.</h2><p>Run the published ten-model ensemble on up to 30 compositions, then rank by the mean prediction, a conservative one-SD lower bound, or model agreement.</p></div><div className="batch-screen-controls"><label>Ranking<select value={ranking} onChange={(event) => setRanking(event.target.value as BatchRanking)}><option value="conservative">Conservative lower bound</option><option value="predicted">Highest predicted conductivity</option><option value="uncertainty">Lowest uncertainty</option></select></label></div></div>
+    <div className="batch-screen-input"><label>One formula per line<textarea rows={8} value={text} onChange={(event) => setText(event.target.value)} /></label><div><button className="primary ionnet-primary" onClick={() => void screen()} disabled={busy}>{busy ? `Predicting ${progress}…` : "Screen formulas"}<ChevronRight size={16}/></button><p>{busy ? `${progress} compositions completed.` : `${text.split(/[\n,;]+/).filter((value) => value.trim()).length} formulas ready.`}</p>{failures.length > 0 && <p className="dataset-error">Could not parse: {failures.join(", ")}</p>}</div></div>
+    {ranked.length > 0 && <><div className="batch-result-summary"><strong>{ranked.length} predictions</strong><button className="result-action" onClick={exportBatch}><Download size={14}/> Export ranked CSV</button></div><div className="ionnet-table-wrap batch-table"><table><thead><tr><th>Rank</th><th>Composition</th><th>log₁₀ σ</th><th>mS cm⁻¹</th><th>Ensemble SD</th><th>One-SD lower bound</th></tr></thead><tbody>{ranked.map((item, index) => <tr key={item.formula}><td>{index + 1}</td><td className="formula-cell">{item.formula}</td><td>{item.logConductivity.toFixed(3)}</td><td>{(item.conductivity * 1000).toExponential(2)}</td><td>{item.uncertainty.toFixed(3)}</td><td>{item.lowerLogConductivity.toFixed(3)}</td></tr>)}</tbody></table></div></>}
+    <p className="dataset-limit">The conservative score is log₁₀σ − ensemble SD; it penalizes model disagreement but is not a calibrated confidence bound. Batch ranking remains composition-only and does not assess synthesizability, phase stability or interfacial compatibility.</p>
+  </section>;
+}
+
 function IonNetModelPrediction({ onUse }: { onUse: () => void }) {
   const [formula, setFormula] = useState("Li10GeP2S12");
   const [result, setResult] = useState<IonNetPrediction>();
@@ -617,6 +680,7 @@ function IonNetModelPrediction({ onUse }: { onUse: () => void }) {
   }
 
   return (
+    <>
     <div className="ionnet-prediction-grid model-prediction-grid">
       <div className="control-card ionnet-control-card">
         <div className="card-heading">
@@ -702,6 +766,8 @@ function IonNetModelPrediction({ onUse }: { onUse: () => void }) {
         )}
       </div>
     </div>
+    <IonNetBatchScreen onUse={onUse} />
+    </>
   );
 }
 
